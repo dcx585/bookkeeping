@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>记账</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -123,11 +126,11 @@ body{
 
 /* Budget vs actual */
 .budget-vs{margin-bottom:16px}
-.budget-vs-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px}
+.budget-vs-row{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid var(--border);font-size:14px}
 .budget-vs-row:last-child{border-bottom:none}
-.budget-vs-row .bv-label{font-weight:500}
-.budget-vs-row .bv-nums{color:var(--text2);font-feature-settings:"tnum";font-variant-numeric:tabular-nums}
-.budget-vs-row .bv-diff{font-weight:600;min-width:50px;text-align:right}
+.budget-vs-row .bv-label{font-weight:600;min-width:90px}
+.budget-vs-row .bv-nums{color:var(--text2);font-feature-settings:"tnum";font-variant-numeric:tabular-nums;font-size:13px}
+.budget-vs-row .bv-diff{font-weight:600;min-width:60px;text-align:right;font-size:14px}
 .budget-vs-row .bv-diff.over{color:var(--red)}
 .budget-vs-row .bv-diff.under{color:var(--green)}
 
@@ -578,6 +581,8 @@ function ts(m){const e=document.getElementById('toast');e.textContent=m;e.classL
 (()=>{const bg=localStorage.getItem(BGK);if(bg)document.querySelector('.bg-layer').style.setProperty('--bg-img',`url(${bg})`)})();
 document.querySelectorAll('.modal').forEach(m=>m.addEventListener('click',function(e){if(e.target===this){m.classList.remove('show');eid=null}}));
 ra();
+// Register service worker
+if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js')}
 </script>
 </body>
 </html>
