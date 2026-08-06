@@ -376,7 +376,9 @@ function sa(d){localStorage.setItem(AK,JSON.stringify(d))}
 function mtx(){return atx().filter(t=>t.time.slice(0,7)===cm).sort((a,b)=>b.time.localeCompare(a.time))}
 
 // ── Init budgets ──
-(()=>{if(!localStorage.getItem(BK)){const d={};CATS.forEach(c=>{const t=c.split('/')[0];d[c]={budget:t==='餐饮'?800:t==='交通'?200:t==='购物'?400:t==='固定支出'?600:t==='医疗'?500:300,recurring:false}});sb(d)}})();
+// Migrate old subcategory budgets → top-level
+(()=>{const b=gb(),keys=Object.keys(b);if(keys.length>0&&keys[0].includes('/')){const g={};keys.forEach(k=>{const t=k.split('/')[0];if(!g[t])g[t]={budget:b[k].budget||0,recurring:false};g[t].recurring=g[t].recurring||b[k].recurring});sb(g)}})();
+(()=>{if(!localStorage.getItem(BK)){const d={};['餐饮','购物','交通','固定支出','医疗'].forEach(c=>{d[c]={budget:c==='餐饮'?800:c==='购物'?400:c==='交通'?200:c==='固定支出'?600:500,recurring:false}});sb(d)}})();
 (()=>{if(!localStorage.getItem(AK))sa(DA)})();
 
 // ── Panel ──
@@ -517,22 +519,41 @@ function closePicker(){document.getElementById('pickerModal').classList.remove('
 
 // ── Budget settings ──
 function openBudgetSettings(){
-  const b=gb();
-  document.getElementById('budgetSettingsList').innerHTML=Object.entries(b).map(([cat,cfg])=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px">
-    <span style="width:90px;flex-shrink:0;color:var(--text)">${cat}</span>
-    <input type="number" value="${cfg.budget||''}" placeholder="预算" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;width:60px" data-cat="${cat}" data-field="budget">
-    <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text2);white-space:nowrap"><input type="checkbox" ${cfg.recurring?'checked':''} data-cat="${cat}" data-field="recurring"> 固定</label>
-  </div>`).join('');
+  const b=gb();const knownTops=[...new Set(CATS.map(c=>c.split('/')[0]))];
+  const all=[...new Set([...knownTops,...Object.keys(b)])];
+  let h=all.map(cat=>{
+    const cfg=b[cat]||{budget:0,recurring:false},isCustom=!knownTops.includes(cat);
+    return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:13px">
+      <span style="width:70px;flex-shrink:0;color:var(--text);font-weight:500">${cat}</span>
+      <input type="number" value="${cfg.budget||''}" placeholder="预算" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;min-width:0" data-cat="${cat}" data-field="budget">
+      <label style="display:flex;align-items:center;gap:3px;font-size:12px;color:var(--text2);white-space:nowrap"><input type="checkbox" ${cfg.recurring?'checked':''} data-cat="${cat}" data-field="recurring"> 固定</label>
+      ${isCustom?`<span onclick="deleteCustomBudget('${cat.replace(/'/g,"\\'")}')" style="color:var(--text3);cursor:pointer;font-size:16px;padding:0 4px">×</span>`:''}
+    </div>`;
+  }).join('');
+  h+=`<button class="quick-btn" onclick="addCustomBudget()" style="width:100%;margin-top:6px;font-size:13px">+ 自定义预算</button>`;
+  document.getElementById('budgetSettingsList').innerHTML=h;
   document.getElementById('budgetSettingsModal').classList.add('show');
+}
+function addCustomBudget(){
+  const n=prompt('预算名称（如：教育、娱乐）：');if(!n||!n.trim())return;
+  const a=parseFloat(prompt('预算金额：'));if(isNaN(a)||a<=0)return ts('请输入有效金额');
+  const b=gb();b[n.trim()]={budget:a,recurring:false};sb(b);
+  openBudgetSettings();ts('已添加 '+n.trim());
+}
+function deleteCustomBudget(cat){
+  if(!confirm('删除 "'+cat+'" 预算？'))return;
+  const b=gb();delete b[cat];sb(b);openBudgetSettings();ts('已删除');
 }
 function closeBudgetSettings(){document.getElementById('budgetSettingsModal').classList.remove('show')}
 function saveBudgetSettings(){
-  const b=gb();
-  document.querySelectorAll('#budgetSettingsList input').forEach(i=>{
-    const cat=i.dataset.cat,f=i.dataset.field;
-    if(!b[cat])b[cat]={budget:0,recurring:false};
-    if(f==='budget')b[cat].budget=parseFloat(i.value)||0;
-    if(f==='recurring')b[cat].recurring=i.checked;
+  const b={};
+  document.querySelectorAll('#budgetSettingsList input[data-field="budget"]').forEach(i=>{
+    const cat=i.dataset.cat;b[cat]=b[cat]||{budget:0,recurring:false};
+    b[cat].budget=parseFloat(i.value)||0;
+  });
+  document.querySelectorAll('#budgetSettingsList input[data-field="recurring"]').forEach(i=>{
+    const cat=i.dataset.cat;b[cat]=b[cat]||{budget:0,recurring:false};
+    b[cat].recurring=i.checked;
   });
   sb(b);closeBudgetSettings();ra();ts('预算已保存');
 }
