@@ -318,10 +318,10 @@ body{
 
 <div class="modal" id="calcModal">
   <div class="sheet"><h3>计算器</h3>
-    <input readonly class="calc-display" id="calcDisplay" value="0">
+    <input class="calc-display" id="calcDisplay" value="0" inputmode="none">
     <div class="calc-accts" id="calcAccts"></div>
     <div class="calc-grid">
-      <button onclick="calcInput('C')" class="calc-btn op">C</button><button onclick="calcBackspace()" class="calc-btn op">⌫</button><button onclick="calcInput(')')" class="calc-btn op">)</button><button onclick="calcInput('÷')" class="calc-btn op">÷</button>
+      <button onclick="calcInput('C')" class="calc-btn op">C</button><button onpointerdown="startBackspace()" onpointerup="stopBackspace()" onpointerleave="stopBackspace()" class="calc-btn op">⌫</button><button onclick="calcInput(')')" class="calc-btn op">)</button><button onclick="calcInput('÷')" class="calc-btn op">÷</button>
       <button onclick="calcInput('7')" class="calc-btn">7</button><button onclick="calcInput('8')" class="calc-btn">8</button><button onclick="calcInput('9')" class="calc-btn">9</button><button onclick="calcInput('×')" class="calc-btn op">×</button>
       <button onclick="calcInput('4')" class="calc-btn">4</button><button onclick="calcInput('5')" class="calc-btn">5</button><button onclick="calcInput('6')" class="calc-btn">6</button><button onclick="calcInput('−')" class="calc-btn op">−</button>
       <button onclick="calcInput('1')" class="calc-btn">1</button><button onclick="calcInput('2')" class="calc-btn">2</button><button onclick="calcInput('3')" class="calc-btn">3</button><button onclick="calcInput('+')" class="calc-btn op">+</button>
@@ -590,6 +590,9 @@ function calcBackspace(){
   if(s!==e){const nv=i.value.slice(0,s)+i.value.slice(e);i.value=nv||'0';i.setSelectionRange(s,s);ce=i.value}
   else{const nv=i.value.slice(0,s-1)+i.value.slice(s);i.value=nv||'0';i.setSelectionRange(s-1,s-1);ce=i.value}
 }
+let bsTimer=null;
+function startBackspace(){calcBackspace();bsTimer=setInterval(calcBackspace,80)}
+function stopBackspace(){clearInterval(bsTimer)}
 function calcInsertAmount(amt){
   const i=cd(),s=i.selectionStart,e=i.selectionEnd;let cur=i.value;
   if(cur==='0'&&s===e)cur='';
@@ -603,9 +606,9 @@ function calcEval(){
 function openCalc(){
   const am={};atx().forEach(t=>{if(t.type==='transfer'){am[t.from]=(am[t.from]||0)-t.amount;am[t.to]=(am[t.to]||0)+t.amount}else if(t.account)am[t.account]=(am[t.account]||0)+(t.type==='income'?t.amount:-t.amount)});
   document.getElementById('calcAccts').innerHTML=ga().map(a=>{const v=am[a]||0;return`<button onclick="calcInsertAmount(${v.toFixed(2)})">${a} ¥${v.toFixed(2)}</button>`}).join('');
-  ce='';cd().value='0';document.getElementById('calcModal').classList.add('show');
+  ce='';cd().value='0';cd().onkeydown=function(e){e.preventDefault()};document.getElementById('calcModal').classList.add('show');
 }
-function closeCalc(){document.getElementById('calcModal').classList.remove('show');ce='';cd().value='0'}
+function closeCalc(){document.getElementById('calcModal').classList.remove('show');ce='';cd().value='0';cd().onkeydown=null}
 function calcDividend(){
   let v=(prompt('每股股息（元）如 0.5：')||'').trim().replace(/，/g,'.').replace(/[^0-9.]/g,'');
   const d=parseFloat(v);
