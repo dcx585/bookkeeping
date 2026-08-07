@@ -283,7 +283,7 @@ body{
     <div class="type-switch">
       <button class="type-btn exp active" onclick="st2('expense',this)">支出</button>
       <button class="type-btn inc" onclick="st2('income',this)">收入</button>
-      <button class="type-btn" onclick="st2('transfer',this)" style="color:var(--gold)">转账</button>
+      <button class="type-btn tfr" onclick="st2('transfer',this)" style="color:var(--gold)">转账</button>
     </div>
     <input type="date" id="txDate"><input type="number" id="txAmount" placeholder="金额" step="0.01" inputmode="decimal">
     <input type="text" id="txNote" placeholder="备注">
@@ -294,6 +294,13 @@ body{
     <div class="row" id="txTransferRow" style="display:none">
       <button class="picker-trigger" id="txFromBtn" onclick="openPicker('account','from')">转出</button>
       <button class="picker-trigger" id="txToBtn" onclick="openPicker('account','to')">转入</button>
+    </div>
+    <div class="row" id="txFeeRow" style="display:none;margin-top:4px">
+      <input type="number" id="txFee" placeholder="手续费（选填）" step="0.01" inputmode="decimal" style="flex:1;margin:0">
+      <select id="txFeePayer" style="padding:14px 10px;border:1px solid var(--border);border-radius:10px;font-size:14px;font-family:inherit;background:var(--bg);color:var(--text);outline:none;flex:0 0 auto">
+        <option value="from">转出方付</option>
+        <option value="to">转入方付</option>
+      </select>
     </div>
     <button class="submit" id="txSubmit" onclick="saveTx()">确认支出</button>
     <button class="cancel-btn" onclick="closeTxModal()">取消</button>
@@ -439,7 +446,7 @@ function rtx(){
     const isE=t.type==='expense',isI=t.type==='income',isT=t.type==='transfer';
     let sign=isE?'−':isI?'+':'⇄';const d=new Date(t.time);
     return `<div class="tx-item" style="animation-delay:${i*55}ms" onclick="editTx('${t.id}')">
-      <div class="info"><div class="title">${t.note||(isT?'转账':isE?'支出':'收入')}</div><div class="meta">${d.getMonth()+1}/${d.getDate()} · ${isT?t.from+' → '+t.to:[t.account,t.category].filter(Boolean).join(' · ')}</div></div>
+      <div class="info"><div class="title">${t.note||(isT?'转账':isE?'支出':'收入')}${isT&&t.fee?`<span style="font-size:11px;color:var(--text3)"> 手续费 ¥${t.fee.toFixed(2)}(${t.feePayer==='to'?'转入方付':'转出方付'})</span>`:''}</div><div class="meta">${d.getMonth()+1}/${d.getDate()} · ${isT?t.from+' → '+t.to:[t.account,t.category].filter(Boolean).join(' · ')}</div></div>
       <div class="amount ${isE?'exp':isI?'inc':''}" style="${isT?'color:var(--gold)':''}">${sign}¥${t.amount.toFixed(2)}</div>
       <div class="del-btn" onclick="event.stopPropagation();delTx('${t.id}')">×</div>
     </div>`;
@@ -495,7 +502,7 @@ function rac(){
   if(cv!=='accts'){sv.classList.remove('show');return}
   sv.classList.add('show');
   const am={};atx().forEach(t=>{
-    if(t.type==='transfer'){am[t.from]=(am[t.from]||0)-t.amount;am[t.to]=(am[t.to]||0)+t.amount}
+    if(t.type==='transfer'){const fee=t.fee||0,fp=t.feePayer||'from';am[t.from]=(am[t.from]||0)-t.amount-(fp==='from'?fee:0);am[t.to]=(am[t.to]||0)+t.amount-(fp==='to'?fee:0)}
     else if(t.account)am[t.account]=(am[t.account]||0)+(t.type==='income'?t.amount:-t.amount);
   });
   document.getElementById('acctList').innerHTML=ga().map(a=>{
@@ -518,11 +525,11 @@ function openTxModal(id,pretype){
   document.getElementById('txAmount').value=id&&t?t.amount:'';
   document.getElementById('txNote').value=id&&t?t.note||'':'';
   const pt=pretype||(t?t.type:'expense');
-  st2(pt,document.querySelector(`.type-btn.${pt==='transfer'?'':pt==='expense'?'exp':'inc'}`)||document.querySelector('.type-btn'));
+  st2(pt,document.querySelector(`.type-btn.${pt==='transfer'?'tfr':pt==='expense'?'exp':'inc'}`)||document.querySelector('.type-btn'));
   document.getElementById('txAcctBtn').textContent='账户';document.getElementById('txAcctBtn').classList.remove('selected');
   document.getElementById('txCatBtn').textContent='分类';document.getElementById('txCatBtn').classList.remove('selected');
   document.getElementById('txFromBtn').textContent='转出';document.getElementById('txToBtn').textContent='转入';
-  if(pt==='transfer'){document.getElementById('txCatRow').style.display='none';document.getElementById('txTransferRow').style.display='flex';if(t){document.getElementById('txFromBtn').textContent=t.from||'转出';document.getElementById('txToBtn').textContent=t.to||'转入'}}
+  if(pt==='transfer'){document.getElementById('txCatRow').style.display='none';document.getElementById('txTransferRow').style.display='flex';document.getElementById('txFeeRow').style.display='flex';if(t){document.getElementById('txFromBtn').textContent=t.from||'转出';document.getElementById('txToBtn').textContent=t.to||'转入';document.getElementById('txFee').value=t.fee||'';document.getElementById('txFeePayer').value=t.feePayer||'from'}}
   else{document.getElementById('txCatRow').style.display='flex';document.getElementById('txTransferRow').style.display='none';if(t){document.getElementById('txAcctBtn').textContent=t.account||'账户';document.getElementById('txAcctBtn').classList.add('selected');document.getElementById('txCatBtn').textContent=t.category||'分类';document.getElementById('txCatBtn').classList.add('selected')}}
   document.getElementById('txSubmit').textContent=id?'保存':pt==='transfer'?'确认转账':'确认'+(pt==='expense'?'支出':'收入');
   document.getElementById('txModal').classList.add('show');
@@ -532,14 +539,14 @@ function saveTx(){
   const a=parseFloat(document.getElementById('txAmount').value),n=document.getElementById('txNote').value.trim(),d=document.getElementById('txDate').value;
   if(!a||a<=0)return ts('请输入金额');if(!d)return ts('请选择日期');
   const data=atx();const entry={id:eid||uid(),time:d+'T12:00:00',type:ct,amount:a,note:n};
-  if(ct==='transfer'){entry.from=document.getElementById('txFromBtn').textContent;entry.to=document.getElementById('txToBtn').textContent;if(entry.from==='转出'||entry.to==='转入')return ts('请选择账户');if(entry.from===entry.to)return ts('不能转到同一账户')}
+  if(ct==='transfer'){entry.from=document.getElementById('txFromBtn').textContent;entry.to=document.getElementById('txToBtn').textContent;if(entry.from==='转出'||entry.to==='转入')return ts('请选择账户');if(entry.from===entry.to)return ts('不能转到同一账户');const fee=parseFloat(document.getElementById('txFee').value)||0;if(fee>0){entry.fee=fee;entry.feePayer=document.getElementById('txFeePayer').value}else{delete entry.fee;delete entry.feePayer}}
   else{entry.account=document.getElementById('txAcctBtn').textContent;entry.category=document.getElementById('txCatBtn').textContent;if(entry.account==='账户')entry.account='';if(entry.category==='分类')entry.category=''}
   if(eid){const i=data.findIndex(t=>t.id===eid);if(i>=0)Object.assign(data[i],entry)}else data.push(entry);
   stx(data);closeTxModal();ra();
 }
 function editTx(id){openTxModal(id)}
 function delTx(id){stx(atx().filter(t=>t.id!==id));ra()}
-function st2(type,btn){ct=type;document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const isT=type==='transfer';document.getElementById('txCatRow').style.display=isT?'none':'flex';document.getElementById('txTransferRow').style.display=isT?'flex':'none';document.getElementById('txSubmit').textContent=isT?'确认转账':type==='expense'?'确认支出':'确认收入'}
+function st2(type,btn){ct=type;document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const isT=type==='transfer';document.getElementById('txCatRow').style.display=isT?'none':'flex';document.getElementById('txTransferRow').style.display=isT?'flex':'none';document.getElementById('txFeeRow').style.display=isT?'flex':'none';document.getElementById('txSubmit').textContent=isT?'确认转账':type==='expense'?'确认支出':'确认收入'}
 
 // ── Picker ──
 let pT='',pS='';
@@ -635,7 +642,7 @@ function calcEval(){
   try{let e=i.value.replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-');const r=Function('"use strict";return ('+e+')')();const v=Number(r.toFixed(10)).toString();i.value=v;ce=v}catch(e){i.value='错误';ce='';setTimeout(()=>{i.value='';ce=''},1000)}
 }
 function openCalc(){
-  const am={};atx().forEach(t=>{if(t.type==='transfer'){am[t.from]=(am[t.from]||0)-t.amount;am[t.to]=(am[t.to]||0)+t.amount}else if(t.account)am[t.account]=(am[t.account]||0)+(t.type==='income'?t.amount:-t.amount)});
+  const am={};atx().forEach(t=>{if(t.type==='transfer'){const fee=t.fee||0,fp=t.feePayer||'from';am[t.from]=(am[t.from]||0)-t.amount-(fp==='from'?fee:0);am[t.to]=(am[t.to]||0)+t.amount-(fp==='to'?fee:0)}else if(t.account)am[t.account]=(am[t.account]||0)+(t.type==='income'?t.amount:-t.amount)});
   document.getElementById('calcAccts').innerHTML=ga().map(a=>{const v=am[a]||0;return`<button onclick="calcInsertAmount(${v.toFixed(2)})">${a} ¥${v.toFixed(2)}</button>`}).join('');
   ce='';cd().value='';document.getElementById('calcModal').classList.add('show');
 }
