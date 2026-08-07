@@ -293,6 +293,7 @@ body{
 <div class="modal" id="bgModal">
   <div class="sheet"><h3>背景</h3>
     <div id="bgPreview" style="width:100%;height:100px;border-radius:10px;background:var(--bg) center/cover;border:1px solid var(--border);margin-bottom:10px"></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px"><span style="color:var(--text2)">显示方式：</span><select id="bgFit" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;background:var(--surface)"><option value="cover">填满屏幕（裁剪）</option><option value="contain">完整显示（留边）</option></select></div>
     <label style="display:block;padding:10px;border:1px solid var(--accent);border-radius:10px;text-align:center;font-size:14px;cursor:pointer;margin-bottom:8px">选择图片<input type="file" id="bgFile" accept="image/*" style="display:none" onchange="handleBgUpload(this)"></label>
     <button class="submit" onclick="applyBg()">应用</button>
     <button class="cancel-btn" onclick="restoreBg()">恢复默认</button>
@@ -626,11 +627,47 @@ function calcTransfer(){closeCalc();openTxModal(null,'transfer')}
 function openMore(){document.getElementById('moreModal').classList.add('show')}
 function closeMore(){document.getElementById('moreModal').classList.remove('show')}
 let pbg=null;
-function openBgModal(){pbg=null;const cur=localStorage.getItem(BGK)||'';document.getElementById('bgPreview').style.background=cur?`url(${cur}) center/cover`:'var(--bg)';document.getElementById('bgFile').value='';document.getElementById('bgModal').classList.add('show')}
+function openBgModal(){
+  pbg=null;const cur=localStorage.getItem(BGK)||'';
+  document.getElementById('bgPreview').style.background=cur?`url(${cur}) center/cover`:'var(--bg)';
+  const fit=localStorage.getItem('minis_bg_fit')||'cover';
+  document.getElementById('bgFit').value=fit;
+  document.getElementById('bgFile').value='';document.getElementById('bgModal').classList.add('show');
+}
 function closeBgModal(){document.getElementById('bgModal').classList.remove('show')}
-function handleBgUpload(i){const f=i.files[0];if(!f)return;if(f.size>4e6)return ts('不超过4MB');const r=new FileReader();r.onload=function(){pbg=r.result;document.getElementById('bgPreview').style.background=`url(${pbg}) center/cover`};r.readAsDataURL(f)}
-function applyBg(){if(!pbg)return ts('请先选图');localStorage.setItem(BGK,pbg);document.querySelector('.bg-layer').style.setProperty('--bg-img',`url(${pbg})`);closeBgModal();ts('已更新')}
-function restoreBg(){localStorage.removeItem(BGK);document.querySelector('.bg-layer').style.removeProperty('--bg-img');pbg=null;document.getElementById('bgPreview').style.background='var(--bg)';document.getElementById('bgFile').value='';ts('已恢复')}
+function handleBgUpload(i){
+  const f=i.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=function(){
+    const img=new Image();
+    img.onload=function(){
+      const maxW=1200;let w=img.width,h=img.height;
+      if(w>maxW){h=Math.round(h*maxW/w);w=maxW;}
+      const c=document.createElement('canvas');c.width=w;c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      pbg=c.toDataURL('image/jpeg',0.72);
+      const fit=document.getElementById('bgFit').value;
+      document.getElementById('bgPreview').style.background=`url(${pbg}) center/${fit}`;
+    };
+    img.src=r.result;
+  };
+  r.readAsDataURL(f);
+}
+function applyBg(){
+  if(!pbg)return ts('请先选图');
+  const fit=document.getElementById('bgFit').value;
+  try{localStorage.setItem(BGK,pbg);localStorage.setItem('minis_bg_fit',fit)}catch(e){return ts('图片太大，请选小一点的')}
+  document.querySelector('.bg-layer').style.setProperty('--bg-img',`url(${pbg})`);
+  document.querySelector('.bg-layer').style.backgroundSize=fit;
+  closeBgModal();ts('已更新');
+}
+function restoreBg(){
+  localStorage.removeItem(BGK);localStorage.removeItem('minis_bg_fit');
+  document.querySelector('.bg-layer').style.removeProperty('--bg-img');
+  document.querySelector('.bg-layer').style.backgroundSize='cover';
+  pbg=null;document.getElementById('bgPreview').style.background='var(--bg)';
+  document.getElementById('bgFile').value='';ts('已恢复');
+}
 function backupData(){const d={tx:atx(),budget:gb(),accts:ga(),bg:localStorage.getItem(BGK)||''};const b=new Blob([JSON.stringify(d)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='记账备份_'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);ts('已下载')}
 function restoreData(){const i=document.createElement('input');i.type='file';i.accept='.json';i.onchange=function(){const f=i.files[0];if(!f)return;const r=new FileReader();r.onload=function(){try{const d=JSON.parse(r.result);if(d.tx)stx(d.tx);if(d.budget)sb(d.budget);if(d.accts)sa(d.accts);if(d.bg)localStorage.setItem(BGK,d.bg);else localStorage.removeItem(BGK);location.reload()}catch(e){ts('无效备份')}};r.readAsText(f)};i.click()}
 function importCSV(){const i=document.createElement('input');i.type='file';i.accept='.csv';i.onchange=function(){const f=i.files[0];if(!f)return;const r=new FileReader();r.onload=function(){try{const ls=r.result.split('\n').filter(l=>l.trim());const d=atx();ls.slice(1).forEach(l=>{const c=l.split(',');if(c.length>=3){d.push({id:uid(),time:c[0]+'T12:00:00',type:c[1].includes('收入')?'income':'expense',amount:parseFloat(c[2])||0,note:c[3]||'',account:c[4]||'',category:c[5]||''})}});stx(d);ra();ts('导入 '+ls.slice(1).length+' 条')}catch(e){ts('格式错误')}};r.readAsText(f)};i.click()}
@@ -638,7 +675,7 @@ function exportCSV(){const tx=atx();if(!tx.length)return ts('无数据');const h
 function ts(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('show'),2000)}
 
 // ── Init ──
-(()=>{const bg=localStorage.getItem(BGK);if(bg)document.querySelector('.bg-layer').style.setProperty('--bg-img',`url(${bg})`)})();
+(()=>{const bg=localStorage.getItem(BGK);if(bg){document.querySelector('.bg-layer').style.setProperty('--bg-img',`url(${bg})`);const fit=localStorage.getItem('minis_bg_fit')||'cover';document.querySelector('.bg-layer').style.backgroundSize=fit}})();
 document.querySelectorAll('.modal').forEach(m=>m.addEventListener('click',function(e){if(e.target===this){m.classList.remove('show');eid=null}}));
 ra();
 // Register service worker
