@@ -183,7 +183,7 @@ body{
 .picker-row .pick-check{color:var(--accent);font-weight:600;margin-left:auto;font-size:13px}
 
 /* Calculator */
-.calc-display{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px;font-size:22px;text-align:right;margin-bottom:10px;font-feature-settings:"tnum";font-variant-numeric:tabular-nums;min-height:56px;word-break:break-all;line-height:1.3}
+.calc-display{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px;font-size:22px;text-align:right;margin-bottom:10px;font-feature-settings:"tnum";font-variant-numeric:tabular-nums;min-height:56px;word-break:break-all;line-height:1.3;width:100%;color:var(--text);outline:none;caret-color:var(--accent);font-family:inherit}
 .calc-accts{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
 .calc-accts button{padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);font-size:12px;color:var(--text2);cursor:pointer;font-family:inherit}
 .calc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
@@ -318,10 +318,10 @@ body{
 
 <div class="modal" id="calcModal">
   <div class="sheet"><h3>计算器</h3>
-    <div class="calc-display" id="calcDisplay">0</div>
+    <input readonly class="calc-display" id="calcDisplay" value="0">
     <div class="calc-accts" id="calcAccts"></div>
     <div class="calc-grid">
-      <button onclick="calcInput('C')" class="calc-btn op">C</button><button onclick="calcInput('(')" class="calc-btn op">(</button><button onclick="calcInput(')')" class="calc-btn op">)</button><button onclick="calcInput('÷')" class="calc-btn op">÷</button>
+      <button onclick="calcInput('C')" class="calc-btn op">C</button><button onclick="calcBackspace()" class="calc-btn op">⌫</button><button onclick="calcInput(')')" class="calc-btn op">)</button><button onclick="calcInput('÷')" class="calc-btn op">÷</button>
       <button onclick="calcInput('7')" class="calc-btn">7</button><button onclick="calcInput('8')" class="calc-btn">8</button><button onclick="calcInput('9')" class="calc-btn">9</button><button onclick="calcInput('×')" class="calc-btn op">×</button>
       <button onclick="calcInput('4')" class="calc-btn">4</button><button onclick="calcInput('5')" class="calc-btn">5</button><button onclick="calcInput('6')" class="calc-btn">6</button><button onclick="calcInput('−')" class="calc-btn op">−</button>
       <button onclick="calcInput('1')" class="calc-btn">1</button><button onclick="calcInput('2')" class="calc-btn">2</button><button onclick="calcInput('3')" class="calc-btn">3</button><button onclick="calcInput('+')" class="calc-btn op">+</button>
@@ -575,12 +575,38 @@ function closeSearch(){document.getElementById('searchBar').style.display='none'
 function doSearch(){sq=document.getElementById('searchInput').value.toLowerCase();rtx()}
 
 // ── Calculator ──
-let ce='';
-function openCalc(){const am={};atx().forEach(t=>{if(t.type==='transfer'){am[t.from]=(am[t.from]||0)-t.amount;am[t.to]=(am[t.to]||0)+t.amount}else if(t.account)am[t.account]=(am[t.account]||0)+(t.type==='income'?t.amount:-t.amount)});document.getElementById('calcAccts').innerHTML=ga().map(a=>{const v=am[a]||0;return`<button onclick="ce+='${v.toFixed(2)}';document.getElementById('calcDisplay').textContent=ce||'${v.toFixed(2)}'">${a} ¥${v.toFixed(2)}</button>`}).join('');document.getElementById('calcModal').classList.add('show')}
-function closeCalc(){document.getElementById('calcModal').classList.remove('show');ce='';document.getElementById('calcDisplay').textContent='0'}
-function calcInput(v){if(v==='C'){ce='';document.getElementById('calcDisplay').textContent='0';return}ce+=v;document.getElementById('calcDisplay').textContent=ce}
-function calcEval(){try{let e=ce.replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-');const r=Function('"use strict";return ('+e+')')();document.getElementById('calcDisplay').textContent=Number(r.toFixed(10));ce=Number(r.toFixed(10)).toString()}catch(e){document.getElementById('calcDisplay').textContent='错误';ce=''}}
-function calcDividend(){const d=parseFloat(prompt('每股股息（元）：')),p=parseFloat(prompt('当前股价（元）：'));if(isNaN(d)||isNaN(p)||!p)return ts('请输入有效数字');const r=(d/p*100).toFixed(2);ce=r;document.getElementById('calcDisplay').textContent='股息率 '+r+'%'}
+let ce='';const cd=()=>document.getElementById('calcDisplay');
+function calcInput(v){
+  const i=cd();
+  if(v==='C'){i.value='0';ce='';return}
+  const s=i.selectionStart,e=i.selectionEnd;let cur=i.value;
+  if(cur==='0'&&s===e)cur='';
+  const nv=cur.slice(0,s)+v+cur.slice(e);i.value=nv;ce=nv;
+  i.setSelectionRange(s+v.length,s+v.length);
+}
+function calcBackspace(){
+  const i=cd(),s=i.selectionStart,e=i.selectionEnd;
+  if(s===0&&e===0)return;
+  if(s!==e){const nv=i.value.slice(0,s)+i.value.slice(e);i.value=nv||'0';i.setSelectionRange(s,s);ce=i.value}
+  else{const nv=i.value.slice(0,s-1)+i.value.slice(s);i.value=nv||'0';i.setSelectionRange(s-1,s-1);ce=i.value}
+}
+function calcInsertAmount(amt){
+  const i=cd(),s=i.selectionStart,e=i.selectionEnd;let cur=i.value;
+  if(cur==='0'&&s===e)cur='';
+  const nv=cur.slice(0,s)+amt.toFixed(2)+cur.slice(e);i.value=nv;ce=nv;
+  i.setSelectionRange(s+String(amt.toFixed(2)).length,s+String(amt.toFixed(2)).length);
+}
+function calcEval(){
+  const i=cd();
+  try{let e=i.value.replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-');const r=Function('"use strict";return ('+e+')')();const v=Number(r.toFixed(10)).toString();i.value=v;ce=v}catch(e){i.value='错误';ce='';setTimeout(()=>{i.value='0';ce=''},1000)}
+}
+function openCalc(){
+  const am={};atx().forEach(t=>{if(t.type==='transfer'){am[t.from]=(am[t.from]||0)-t.amount;am[t.to]=(am[t.to]||0)+t.amount}else if(t.account)am[t.account]=(am[t.account]||0)+(t.type==='income'?t.amount:-t.amount)});
+  document.getElementById('calcAccts').innerHTML=ga().map(a=>{const v=am[a]||0;return`<button onclick="calcInsertAmount(${v.toFixed(2)})">${a} ¥${v.toFixed(2)}</button>`}).join('');
+  ce='';cd().value='0';document.getElementById('calcModal').classList.add('show');
+}
+function closeCalc(){document.getElementById('calcModal').classList.remove('show');ce='';cd().value='0'}
+function calcDividend(){const d=parseFloat(prompt('每股股息（元）：')),p=parseFloat(prompt('当前股价（元）：'));if(isNaN(d)||isNaN(p)||!p)return ts('请输入有效数字');const r=(d/p*100).toFixed(2);ce=r;cd().value=r}
 function calcTransfer(){closeCalc();openTxModal(null,'transfer')}
 
 // ── More / BG / Backup ──
