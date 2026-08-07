@@ -580,7 +580,7 @@ function openCalc(){const am={};atx().forEach(t=>{if(t.type==='transfer'){am[t.f
 function closeCalc(){document.getElementById('calcModal').classList.remove('show');ce='';document.getElementById('calcDisplay').textContent='0'}
 function calcInput(v){if(v==='C'){ce='';document.getElementById('calcDisplay').textContent='0';return}ce+=v;document.getElementById('calcDisplay').textContent=ce}
 function calcEval(){try{let e=ce.replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-');const r=Function('"use strict";return ('+e+')')();document.getElementById('calcDisplay').textContent=Number(r.toFixed(10));ce=Number(r.toFixed(10)).toString()}catch(e){document.getElementById('calcDisplay').textContent='错误';ce=''}}
-function calcDividend(){ce='';document.getElementById('calcDisplay').textContent='股息 ÷ 股价 × 100'}
+function calcDividend(){const d=parseFloat(prompt('每股股息（元）：')),p=parseFloat(prompt('当前股价（元）：'));if(isNaN(d)||isNaN(p)||!p)return ts('请输入有效数字');const r=(d/p*100).toFixed(2);ce=r;document.getElementById('calcDisplay').textContent='股息率 '+r+'%'}
 function calcTransfer(){closeCalc();openTxModal(null,'transfer')}
 
 // ── More / BG / Backup ──
