@@ -6,7 +6,7 @@
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<title>记账</title>
+<title>账</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -401,6 +401,7 @@ body{
 
 <div class="bottom-bar">
   <button onclick="openSearch()">搜索</button>
+  <button onclick="toggleFS()">全屏</button>
   <button onclick="openMore()">更多</button>
 </div>
 
@@ -413,7 +414,7 @@ body{
   if(h>=6&&h<12)g='早上好';else if(h>=12&&h<14)g='中午好';else if(h>=14&&h<18)g='下午好';else if(h>=18&&h<24)g='晚上好';else g='夜深了';
   const t='hi，'+g,el=document.getElementById('splashText');
   el.innerHTML=t.split('').map((c,i)=>`<span class="splash-char" style="animation-delay:${i*80}ms">${c}</span>`).join('');
-  let d=false;function dismiss(){if(d)return;d=true;document.getElementById('splash').classList.add('fadeout');setTimeout(()=>{const s=document.getElementById('splash');if(s)s.remove()},500)}
+  let d=false;function dismiss(){if(d)return;d=true;document.getElementById('splash').classList.add('fadeout');setTimeout(()=>{const s=document.getElementById('splash');if(s)s.remove()},500);if(document.documentElement.requestFullscreen)document.documentElement.requestFullscreen().catch(()=>{})}
   document.getElementById('splash').addEventListener('click',dismiss);
   setTimeout(dismiss,1500+t.length*80);
 })();
@@ -851,6 +852,8 @@ function doImportConfirm(){
 })();
 document.querySelectorAll('.modal').forEach(m=>m.addEventListener('click',function(e){if(e.target===this){m.classList.remove('show');eid=null}}));
 ra();
+// Fullscreen toggle
+function toggleFS(){if(!document.fullscreenElement){document.documentElement.requestFullscreen().catch(()=>{ts('不支持全屏')})}else{document.exitFullscreen()}}
 // Register service worker
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js')}
 </script>
