@@ -556,8 +556,8 @@ function closePicker(){document.getElementById('pickerModal').classList.remove('
 
 // ── Budget settings ──
 function openBudgetSettings(){
-  const b=gb();const knownTops=[...new Set(CATS.map(c=>c.split('/')[0]))];
-  const all=[...new Set([...knownTops,...Object.keys(b)])];
+  const b=gb();
+  const all=Object.keys(b);
   let h=all.map(cat=>{
     const cfg=b[cat]||{budget:0,recurring:false};
     return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:13px">
