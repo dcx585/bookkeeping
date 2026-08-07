@@ -318,7 +318,7 @@ body{
 
 <div class="modal" id="calcModal">
   <div class="sheet"><h3>计算器</h3>
-    <input readonly class="calc-display" id="calcDisplay" value="0" inputmode="none">
+    <input readonly class="calc-display" id="calcDisplay" value="" inputmode="none">
     <div class="calc-accts" id="calcAccts"></div>
     <div class="calc-grid">
       <button onclick="calcInput('C')" class="calc-btn op">C</button><button onpointerdown="startBackspace()" onpointerup="stopBackspace()" onpointerleave="stopBackspace()" class="calc-btn op">⌫</button><button onclick="calcInput(')')" class="calc-btn op">)</button><button onclick="calcInput('÷')" class="calc-btn op">÷</button>
@@ -579,7 +579,7 @@ let ce='';const cd=()=>document.getElementById('calcDisplay');
 function cs(i,p){i.removeAttribute('readonly');i.setSelectionRange(p,p);i.setAttribute('readonly','')}
 function calcInput(v){
   const i=cd();
-  if(v==='C'){i.value='0';ce='';return}
+  if(v==='C'){i.value='';ce='';return}
   const s=i.selectionStart,e=i.selectionEnd;let cur=i.value;
   if(cur==='0'&&s===e&&v!=='.')cur='';
   const nv=cur.slice(0,s)+v+cur.slice(e);i.value=nv;ce=nv;
@@ -588,8 +588,8 @@ function calcInput(v){
 function calcBackspace(){
   const i=cd(),s=i.selectionStart,e=i.selectionEnd;
   if(s===0&&e===0)return;
-  if(s!==e){const nv=i.value.slice(0,s)+i.value.slice(e);i.value=nv||'0';cs(i,s);ce=i.value}
-  else{const nv=i.value.slice(0,s-1)+i.value.slice(s);i.value=nv||'0';cs(i,s-1);ce=i.value}
+  if(s!==e){const nv=i.value.slice(0,s)+i.value.slice(e);i.value=nv;cs(i,s);ce=i.value}
+  else{const nv=i.value.slice(0,s-1)+i.value.slice(s);i.value=nv;cs(i,s-1);ce=i.value}
 }
 let bsTimer=null;
 function startBackspace(){calcBackspace();bsTimer=setInterval(calcBackspace,80)}
@@ -602,14 +602,14 @@ function calcInsertAmount(amt){
 }
 function calcEval(){
   const i=cd();
-  try{let e=i.value.replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-');const r=Function('"use strict";return ('+e+')')();const v=Number(r.toFixed(10)).toString();i.value=v;ce=v}catch(e){i.value='错误';ce='';setTimeout(()=>{i.value='0';ce=''},1000)}
+  try{let e=i.value.replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-');const r=Function('"use strict";return ('+e+')')();const v=Number(r.toFixed(10)).toString();i.value=v;ce=v}catch(e){i.value='错误';ce='';setTimeout(()=>{i.value='';ce=''},1000)}
 }
 function openCalc(){
   const am={};atx().forEach(t=>{if(t.type==='transfer'){am[t.from]=(am[t.from]||0)-t.amount;am[t.to]=(am[t.to]||0)+t.amount}else if(t.account)am[t.account]=(am[t.account]||0)+(t.type==='income'?t.amount:-t.amount)});
   document.getElementById('calcAccts').innerHTML=ga().map(a=>{const v=am[a]||0;return`<button onclick="calcInsertAmount(${v.toFixed(2)})">${a} ¥${v.toFixed(2)}</button>`}).join('');
-  ce='';cd().value='0';document.getElementById('calcModal').classList.add('show');
+  ce='';cd().value='';document.getElementById('calcModal').classList.add('show');
 }
-function closeCalc(){document.getElementById('calcModal').classList.remove('show');ce='';cd().value='0'}
+function closeCalc(){document.getElementById('calcModal').classList.remove('show');ce='';cd().value=''}
 function calcDividend(){
   let v=(prompt('每股股息（元）如 0.5：')||'').trim().replace(/，/g,'.').replace(/[^0-9.]/g,'');
   const d=parseFloat(v);
