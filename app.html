@@ -353,6 +353,16 @@ body{
   </div>
 </div>
 
+<div class="modal" id="dividendModal">
+  <div class="sheet"><h3>股息率</h3>
+    <input type="number" id="divPrice" placeholder="当前股价（元）" step="0.01" inputmode="decimal">
+    <input type="number" id="divAmount" placeholder="每股股息（元）" step="0.01" inputmode="decimal">
+    <div id="divResult" style="text-align:center;font-size:18px;font-weight:600;margin-bottom:10px;min-height:24px"></div>
+    <button class="submit" onclick="calcDivYield()">= 计算</button>
+    <button class="cancel-btn" onclick="closeDividend()">取消</button>
+  </div>
+</div>
+
 <div class="modal" id="calcModal">
   <div class="sheet"><h3>计算器</h3>
     <input readonly class="calc-display" id="calcDisplay" value="" inputmode="none">
@@ -365,7 +375,7 @@ body{
       <button onclick="calcInput('0')" class="calc-btn" style="grid-column:span 2">0</button><button onclick="calcInput('.')" class="calc-btn">.</button><button onclick="calcEval()" class="calc-btn eq">=</button>
     </div>
     <div style="display:flex;gap:8px;margin-top:10px">
-      <button onclick="calcDividend()" class="cancel-btn" style="margin:0;flex:1">股息率</button>
+      <button onclick="openDividend()" class="cancel-btn" style="margin:0;flex:1">股息率</button>
       <button onclick="calcTransfer()" class="cancel-btn" style="margin:0;flex:1">转账</button>
     </div>
     <button class="cancel-btn" onclick="closeCalc()" style="margin-top:8px">关闭</button>
@@ -647,16 +657,21 @@ function openCalc(){
   ce='';cd().value='';document.getElementById('calcModal').classList.add('show');
 }
 function closeCalc(){document.getElementById('calcModal').classList.remove('show');ce='';cd().value=''}
-function calcDividend(){
-  let v=(prompt('每股股息（元）如 0.5：')||'').trim().replace(/，/g,'.').replace(/[^0-9.]/g,'');
-  const d=parseFloat(v);
-  if(isNaN(d)||d<=0)return ts('股息输入有误');
-  v=(prompt('当前股价（元）如 10：')||'').trim().replace(/，/g,'.').replace(/[^0-9.]/g,'');
-  const p=parseFloat(v);
-  if(isNaN(p)||p<=0)return ts('股价输入有误');
+
+// ── 股息率弹窗 ──
+function openDividend(){closeCalc();document.getElementById('divPrice').value='';document.getElementById('divAmount').value='';document.getElementById('divResult').textContent='';document.getElementById('dividendModal').classList.add('show')}
+function closeDividend(){document.getElementById('dividendModal').classList.remove('show')}
+function calcDivYield(){
+  const p=parseFloat(document.getElementById('divPrice').value);
+  if(isNaN(p)||p<=0)return ts('请输入有效股价');
+  const d=parseFloat(document.getElementById('divAmount').value);
+  if(isNaN(d)||d<=0)return ts('请输入有效股息');
   const r=(d/p*100).toFixed(2);
-  ce=r;cd().value=r+'%';
+  document.getElementById('divResult').textContent='股息率 '+r+'%';
+  closeDividend();
+  openCalc();ce=r;cd().value=r+'%';
 }
+
 function calcTransfer(){closeCalc();openTxModal(null,'transfer')}
 
 // ── More / BG / Backup ──
