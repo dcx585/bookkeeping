@@ -20,6 +20,9 @@
   --green:#3c7a44;
   --gold:#b8943e;
   --accent:#1a1a1a;
+  --bg-img:none;
+  --bg-size:cover;
+  --bg-color:transparent;
 }
 body{
   font:-apple-system-body,"PingFang SC","Noto Sans SC",sans-serif;
@@ -32,21 +35,42 @@ body{
 
 .bg-layer{
   position:fixed;inset:0;z-index:0;pointer-events:none;
-  background-color:var(--bg-color,transparent);
-  background-image:var(--bg-img,none);
+  background-image:var(--bg-img);
   background-position:center;
-  background-size:var(--bg-size,cover);
+  background-size:var(--bg-size);
   background-repeat:no-repeat;
+  background-color:var(--bg-color);
 }
 
 /* ── Splash ── */
 .splash{
   position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;
-  background:var(--bg);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  background-image:var(--bg-img);
+  background-size:var(--bg-size);
+  background-position:center;
+  background-repeat:no-repeat;
+  background-color:var(--bg-color,var(--bg));
   transition:opacity .5s;
+  overflow:hidden;
+}
+.splash::before{
+  content:'';position:absolute;inset:-30px;
+  background-image:inherit;
+  background-size:inherit;
+  background-position:inherit;
+  background-repeat:inherit;
+  background-color:inherit;
+  filter:blur(20px);
+  z-index:0;
+}
+.splash::after{
+  content:'';position:absolute;inset:0;
+  background:rgba(255,255,255,.15);
+  z-index:1;
 }
 .splash.fadeout{opacity:0;pointer-events:none}
 .splash-text{
+  position:relative;z-index:2;
   font-family:'Snell Roundhand','Zapfino','Brush Script MT','Georgia',serif;
   font-size:42px;font-weight:400;color:var(--text);font-style:italic;letter-spacing:.04em;
 }
@@ -638,10 +662,10 @@ async function saveBg(img,fit,color){const d=await bgDB();const t=d.transaction(
 async function loadBgData(){try{const d=await bgDB();const t=d.transaction('bg','readonly');const s=t.objectStore('bg');const img=s.get('img'),fit=s.get('fit'),color=s.get('color');return new Promise(r=>{let i=null,f='cover',c='';img.onsuccess=()=>{i=img.result};fit.onsuccess=()=>{f=fit.result||'cover'};color.onsuccess=()=>{c=color.result||''};t.oncomplete=()=>r({img:i,fit:f,color:c})})}catch(e){return {img:null,fit:'cover',color:''}}}
 async function delBg(){try{const d=await bgDB();const t=d.transaction('bg','readwrite');t.objectStore('bg').clear();return new Promise(r=>{t.oncomplete=r})}catch(e){}}
 function applyBgLayer(img,fit,color){
-  const l=document.querySelector('.bg-layer');
-  l.style.setProperty('--bg-img',img?`url(${img})`:'none');
-  l.style.setProperty('--bg-size',fit||'cover');
-  l.style.setProperty('--bg-color',color||'transparent');
+  const r=document.documentElement;
+  r.style.setProperty('--bg-img',img?`url(${img})`:'none');
+  r.style.setProperty('--bg-size',fit||'cover');
+  r.style.setProperty('--bg-color',color||'transparent');
 }
 let pbg=null;
 function openBgModal(){
