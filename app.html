@@ -320,8 +320,19 @@ body{
       <button class="cancel-btn" onclick="backupData();closeMore()" style="margin:0">💾 备份</button>
       <button class="cancel-btn" onclick="restoreData();closeMore()" style="margin:0">📥 恢复</button>
       <button class="cancel-btn" onclick="importCSV();closeMore()" style="margin:0">📤 导入CSV</button>
+      <button class="cancel-btn" onclick="openImportNotify();closeMore()" style="margin:0">📲 导入通知</button>
     </div>
     <button class="cancel-btn" onclick="closeMore()" style="margin-top:8px">关闭</button>
+  </div>
+</div>
+
+<div class="modal" id="importNotifyModal">
+  <div class="sheet"><h3>导入通知</h3>
+    <div id="importNotifyStatus" style="text-align:center;color:var(--text2);padding:20px 0;font-size:14px">点击扫描按钮读取支付通知</div>
+    <div id="importNotifyList" style="max-height:40vh;overflow-y:auto;margin-bottom:10px"></div>
+    <button class="submit" onclick="doImportScan()">🔍 扫描通知</button>
+    <button class="submit" id="importConfirmBtn" onclick="doImportConfirm()" style="display:none">✓ 确认导入</button>
+    <button class="cancel-btn" onclick="closeImportNotify()" style="margin-top:4px">关闭</button>
   </div>
 </div>
 
@@ -766,6 +777,51 @@ function restoreData(){const i=document.createElement('input');i.type='file';i.a
 function importCSV(){const i=document.createElement('input');i.type='file';i.accept='.csv';i.onchange=function(){const f=i.files[0];if(!f)return;const r=new FileReader();r.onload=function(){try{const ls=r.result.split('\n').filter(l=>l.trim());const d=atx();ls.slice(1).forEach(l=>{const c=l.split(',');if(c.length>=3){d.push({id:uid(),time:c[0]+'T12:00:00',type:c[1].includes('收入')?'income':'expense',amount:parseFloat(c[2])||0,note:c[3]||'',account:c[4]||'',category:c[5]||''})}});stx(d);ra();ts('导入 '+ls.slice(1).length+' 条')}catch(e){ts('格式错误')}};r.readAsText(f)};i.click()}
 function exportCSV(){const tx=atx();if(!tx.length)return ts('无数据');const h='日期,类型,金额,备注,账户,分类',rows=tx.map(t=>[t.time.slice(0,10),t.type==='expense'?'支出':'收入',t.amount.toFixed(2),t.note||'',t.account||'',t.category||''].join(','));const b=new Blob(['\ufeff'+[h,...rows].join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='记账_'+cm+'.csv';a.click();URL.revokeObjectURL(a.href);ts('已导出')}
 function ts(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('show'),2000)}
+
+// ── 通知导入 ──
+let impTx=[];
+function openImportNotify(){
+  impTx=[];document.getElementById('importNotifyStatus').style.display='block';
+  document.getElementById('importNotifyStatus').textContent='点击扫描按钮读取支付通知';
+  document.getElementById('importNotifyList').innerHTML='';
+  document.getElementById('importConfirmBtn').style.display='none';
+  document.getElementById('importNotifyModal').classList.add('show');
+}
+function closeImportNotify(){document.getElementById('importNotifyModal').classList.remove('show')}
+async function doImportScan(){
+  document.getElementById('importNotifyStatus').textContent='扫描中...';
+  document.getElementById('importConfirmBtn').style.display='none';
+  impTx=[];
+  try{
+    const x=new XMLHttpRequest();
+    x.open('GET','minis://shared/bookkeeping/imported_tx.json',false);
+    x.send();
+    if(x.status!==200)throw new Error('无法读取');
+    impTx=JSON.parse(x.responseText);
+    if(!impTx.length){
+      document.getElementById('importNotifyStatus').textContent='未发现支付通知。请保留银行/支付通知不要划掉，然后在 Minis 聊天中说「导入通知」触发扫描。';
+      return;
+    }
+    document.getElementById('importNotifyStatus').style.display='none';
+    document.getElementById('importNotifyList').innerHTML=impTx.map((t,i)=>`<div style="display:flex;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:8px;font-size:14px">
+      <input type="checkbox" checked data-idx="${i}" style="width:18px;height:18px">
+      <span style="flex:1"><b>¥${t.amount.toFixed(2)}</b> ${t.type==='income'?'收入':'支出'} · ${t.category}${t.account?' · '+t.account:''}<br><span style="font-size:12px;color:var(--text2)">${t.note||''}</span></span>
+    </div>`).join('');
+    document.getElementById('importConfirmBtn').style.display='block';
+  }catch(e){
+    document.getElementById('importNotifyStatus').textContent='请先在 Minis 聊天中发送「导入通知」，然后再回来打开此页面。';
+  }
+}
+function doImportConfirm(){
+  const checked=document.querySelectorAll('#importNotifyList input:checked');
+  if(!checked.length)return ts('请至少选择一条');
+  const tx=atx(),today=new Date().toISOString().slice(0,10);
+  checked.forEach(cb=>{
+    const t=impTx[parseInt(cb.dataset.idx)];
+    tx.push({id:uid(),time:today+'T12:00:00',type:t.type,amount:t.amount,note:t.note||'',account:t.account||'',category:t.category||'其他'});
+  });
+  stx(tx);closeImportNotify();ra();ts('已导入 '+checked.length+' 条');
+}
 
 // ── Init ──
 (async function(){
