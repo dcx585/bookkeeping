@@ -320,6 +320,7 @@ body{
       <button class="cancel-btn" onclick="backupData();closeMore()" style="margin:0">💾 备份</button>
       <button class="cancel-btn" onclick="restoreData();closeMore()" style="margin:0">📥 恢复</button>
       <button class="cancel-btn" onclick="importCSV();closeMore()" style="margin:0">📤 导入CSV</button>
+      <button class="cancel-btn" onclick="importFromClipboard();closeMore()" style="margin:0">📋 从剪贴板导入</button>
       <button class="cancel-btn" onclick="openImportNotify();closeMore()" style="margin:0">📲 导入通知</button>
     </div>
     <button class="cancel-btn" onclick="closeMore()" style="margin-top:8px">关闭</button>
@@ -777,6 +778,23 @@ function restoreData(){const i=document.createElement('input');i.type='file';i.a
 function importCSV(){const i=document.createElement('input');i.type='file';i.accept='.csv';i.onchange=function(){const f=i.files[0];if(!f)return;const r=new FileReader();r.onload=function(){try{const ls=r.result.split('\n').filter(l=>l.trim());const d=atx();ls.slice(1).forEach(l=>{const c=l.split(',');if(c.length>=3){d.push({id:uid(),time:c[0]+'T12:00:00',type:c[1].includes('收入')?'income':'expense',amount:parseFloat(c[2])||0,note:c[3]||'',account:c[4]||'',category:c[5]||''})}});stx(d);ra();ts('导入 '+ls.slice(1).length+' 条')}catch(e){ts('格式错误')}};r.readAsText(f)};i.click()}
 function exportCSV(){const tx=atx();if(!tx.length)return ts('无数据');const h='日期,类型,金额,备注,账户,分类',rows=tx.map(t=>[t.time.slice(0,10),t.type==='expense'?'支出':'收入',t.amount.toFixed(2),t.note||'',t.account||'',t.category||''].join(','));const b=new Blob(['\ufeff'+[h,...rows].join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='记账_'+cm+'.csv';a.click();URL.revokeObjectURL(a.href);ts('已导出')}
 function ts(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('show'),2000)}
+
+// ── 剪贴板导入 ──
+async function importFromClipboard(){
+  try{
+    const text=await navigator.clipboard.readText();
+    const items=JSON.parse(text);
+    if(!Array.isArray(items)||!items.length)return ts('剪贴板无有效导入数据');
+    const cur=atx(),ids=new Set(cur.map(t=>t.id)),today=new Date().toISOString().slice(0,10);
+    let added=0;
+    items.forEach(t=>{
+      const id='imp_'+Date.now()+'_'+added;
+      if(!ids.has(id)){cur.push({id,time:today+'T12:00:00',type:t.type,amount:t.amount,note:t.note||'',account:t.account||'',category:t.category||'其他'});added++}
+    });
+    if(!added)return ts('没有新数据');
+    stx(cur);ra();ts('已导入 '+added+' 条');
+  }catch(e){ts('剪贴板读取失败，请先在 Minis 中说「导入通知」')}
+}
 
 // ── 通知导入 ──
 let impTx=[];
