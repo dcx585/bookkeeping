@@ -559,12 +559,12 @@ function openBudgetSettings(){
   const b=gb();const knownTops=[...new Set(CATS.map(c=>c.split('/')[0]))];
   const all=[...new Set([...knownTops,...Object.keys(b)])];
   let h=all.map(cat=>{
-    const cfg=b[cat]||{budget:0,recurring:false},isCustom=!knownTops.includes(cat);
+    const cfg=b[cat]||{budget:0,recurring:false};
     return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:13px">
-      <span style="width:70px;flex-shrink:0;color:var(--text);font-weight:500">${cat}</span>
+      <span style="width:60px;flex-shrink:0;color:var(--text);font-weight:500">${cat}</span>
       <input type="number" value="${cfg.budget||''}" placeholder="预算" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;min-width:0" data-cat="${cat}" data-field="budget">
       <label style="display:flex;align-items:center;gap:3px;font-size:12px;color:var(--text2);white-space:nowrap"><input type="checkbox" ${cfg.recurring?'checked':''} data-cat="${cat}" data-field="recurring"> 固定</label>
-      ${isCustom?`<span onclick="deleteCustomBudget('${cat.replace(/'/g,"\\'")}')" style="color:var(--text3);cursor:pointer;font-size:16px;padding:0 4px">×</span>`:''}
+      <span onclick="deleteBudgetItem('${cat.replace(/'/g,"\\'")}')" style="color:var(--text3);cursor:pointer;font-size:16px;padding:0 4px;flex-shrink:0">×</span>
     </div>`;
   }).join('');
   h+=`<button class="quick-btn" onclick="addCustomBudget()" style="width:100%;margin-top:6px;font-size:13px">+ 自定义预算</button>`;
@@ -577,7 +577,7 @@ function addCustomBudget(){
   const b=gb();b[n.trim()]={budget:a,recurring:false};sb(b);
   openBudgetSettings();ts('已添加 '+n.trim());
 }
-function deleteCustomBudget(cat){
+function deleteBudgetItem(cat){
   if(!confirm('删除 "'+cat+'" 预算？'))return;
   const b=gb();delete b[cat];sb(b);openBudgetSettings();ts('已删除');
 }
