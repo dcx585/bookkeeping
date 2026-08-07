@@ -606,7 +606,16 @@ function openCalc(){
   ce='';cd().value='0';document.getElementById('calcModal').classList.add('show');
 }
 function closeCalc(){document.getElementById('calcModal').classList.remove('show');ce='';cd().value='0'}
-function calcDividend(){const d=parseFloat(prompt('每股股息（元）：')),p=parseFloat(prompt('当前股价（元）：'));if(isNaN(d)||isNaN(p)||!p)return ts('请输入有效数字');const r=(d/p*100).toFixed(2);ce=r;cd().value=r}
+function calcDividend(){
+  let v=(prompt('每股股息（元）如 0.5：')||'').trim().replace(/，/g,'.').replace(/[^0-9.]/g,'');
+  const d=parseFloat(v);
+  if(isNaN(d)||d<=0)return ts('股息输入有误');
+  v=(prompt('当前股价（元）如 10：')||'').trim().replace(/，/g,'.').replace(/[^0-9.]/g,'');
+  const p=parseFloat(v);
+  if(isNaN(p)||p<=0)return ts('股价输入有误');
+  const r=(d/p*100).toFixed(2);
+  ce=r;cd().value=r+'%';
+}
 function calcTransfer(){closeCalc();openTxModal(null,'transfer')}
 
 // ── More / BG / Backup ──
