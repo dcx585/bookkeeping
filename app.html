@@ -23,6 +23,7 @@
   --bg-img:none;
   --bg-size:cover;
   --bg-color:transparent;
+  --bg-overlay:rgba(255,255,255,0.35);
 }
 body{
   font:-apple-system-body,"PingFang SC","Noto Sans SC",sans-serif;
@@ -40,6 +41,11 @@ body{
   background-size:var(--bg-size);
   background-repeat:no-repeat;
   background-color:var(--bg-color);
+}
+.bg-overlay{
+  position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:var(--bg-overlay);
+  transition:background .3s;
 }
 
 /* ── Splash ── */
@@ -185,7 +191,7 @@ body{
 /* ── Modals ── */
 .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:200;align-items:flex-end;justify-content:center;backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}
 .modal.show{display:flex}
-.sheet{background:var(--surface);width:100%;max-width:420px;border-radius:18px 18px 0 0;padding:24px 20px max(32px, env(safe-area-inset-bottom));animation:slideUp .35s cubic-bezier(.16,1,.3,1)}
+.sheet{background:var(--surface);width:100%;max-width:420px;border-radius:18px 18px 0 0;padding:24px 20px calc(max(32px, env(safe-area-inset-bottom)) + var(--kb, 0px));animation:slideUp .35s cubic-bezier(.16,1,.3,1);transition:padding-bottom .15s}
 @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
 .sheet h3{font-size:16px;font-weight:600;text-align:center;margin-bottom:20px;color:var(--text)}
 .type-switch{display:flex;gap:0;background:var(--bg);border-radius:10px;padding:3px;margin-bottom:18px}
@@ -231,6 +237,7 @@ body{
 
 <div class="splash" id="splash"><div class="splash-text" id="splashText">hi，中午好</div></div>
 <div class="bg-layer"></div>
+<div class="bg-overlay"></div>
 
 <div class="panel" id="panel">
   <div class="panel-handle"></div>
@@ -342,6 +349,7 @@ body{
     <div id="bgPreview" style="width:100%;height:100px;border-radius:10px;background:var(--bg) center/cover;border:1px solid var(--border);margin-bottom:10px"></div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px"><span style="color:var(--text2)">显示方式：</span><select id="bgFit" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;background:var(--surface)" onchange="previewBg()"><option value="cover">填满屏幕（裁剪）</option><option value="contain">完整显示（留边）</option></select></div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px"><span style="color:var(--text2);white-space:nowrap">底色：</span><input type="color" id="bgColor" value="#f8f6f2" style="width:36px;height:32px;border:1px solid var(--border);border-radius:6px;cursor:pointer;padding:2px" onchange="previewBg()"><input type="text" id="bgColorHex" value="#f8f6f2" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;background:var(--surface)" oninput="document.getElementById('bgColor').value=this.value;previewBg()"></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px"><span style="color:var(--text2);white-space:nowrap">遮罩：</span><input type="range" id="bgOverlay" min="0" max="80" value="35" style="flex:1" oninput="previewBg()"><span id="bgOverlayVal" style="font-size:12px;color:var(--text2);min-width:30px;text-align:right">35%</span></div>
     <label style="display:block;padding:10px;border:1px solid var(--accent);border-radius:10px;text-align:center;font-size:14px;cursor:pointer;margin-bottom:8px">选择图片<input type="file" id="bgFile" accept="image/*" style="display:none" onchange="handleBgUpload(this)"></label>
     <button class="submit" onclick="applyBg()">应用</button>
     <button class="cancel-btn" onclick="restoreBg()">恢复默认</button>
@@ -424,7 +432,8 @@ const SK='minis_bookkeeping_v5',BK='minis_budget_v3',AK='minis_accounts_v2',BGK=
 let cm=new Date().toISOString().slice(0,7),ct='expense',cv='tx',eid=null,sq='';
 const DA=['微信','银行卡','应急金','花呗'];
 const CATS=['餐饮/早午晚餐','餐饮/水果零食','餐饮/饮料','购物/日用品','购物/化妆护肤','医疗/挂号门诊','医疗/药品','交通/打车','交通/公共交通','固定支出/话费','固定支出/家里生活费','其他'];
-const CC={'餐饮':'#c0392b','购物':'#b8943e','交通':'#5b9eb5','固定支出':'#8b7aaa','医疗':'#d4735a','其他':'#8899a6'};
+const INC_CATS=['工资/月薪','工资/奖金','理财/基金收益','理财/股息','理财/利息','报销/工作报销','红包/转账','兼职/外快','退款','其他'];
+const CC={'餐饮':'#c0392b','购物':'#b8943e','交通':'#5b9eb5','固定支出':'#8b7aaa','医疗':'#d4735a','工资':'#3c7a44','理财':'#b8860b','报销':'#5b9eb5','红包':'#e67e22','兼职':'#8e44ad','退款':'#7f8c8d','其他':'#8899a6'};
 function cc(c){return CC[(c||'其他').split('/')[0]]||'#8899a6'}
 let cid=Date.now();function uid(){cid++;return cid.toString(36)+Math.random().toString(36).slice(2,6)}
 function atx(){return JSON.parse(localStorage.getItem(SK)||'[]')}
@@ -569,11 +578,11 @@ function saveTx(){
 }
 function editTx(id){openTxModal(id)}
 function delTx(id){stx(atx().filter(t=>t.id!==id));ra()}
-function st2(type,btn){ct=type;document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const isT=type==='transfer';document.getElementById('txCatRow').style.display=isT?'none':'flex';document.getElementById('txTransferRow').style.display=isT?'flex':'none';document.getElementById('txFeeRow').style.display=isT?'flex':'none';document.getElementById('txSubmit').textContent=isT?'确认转账':type==='expense'?'确认支出':'确认收入'}
+function st2(type,btn){ct=type;document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const isT=type==='transfer';document.getElementById('txCatRow').style.display=isT?'none':'flex';document.getElementById('txTransferRow').style.display=isT?'flex':'none';document.getElementById('txFeeRow').style.display=isT?'flex':'none';document.getElementById('txSubmit').textContent=isT?'确认转账':type==='expense'?'确认支出':'确认收入';document.getElementById('txCatBtn').textContent='分类';document.getElementById('txCatBtn').classList.remove('selected')}
 
 // ── Picker ──
 let pT='',pS='';
-function openPicker(type,sub){pT=type;pS=sub||'';const ops=type==='account'?ga():CATS;const cur=sub==='from'?document.getElementById('txFromBtn').textContent:sub==='to'?document.getElementById('txToBtn').textContent:type==='account'?document.getElementById('txAcctBtn').textContent:document.getElementById('txCatBtn').textContent;document.getElementById('pickerTitle').textContent=type==='account'?'选择账户':'选择分类';document.getElementById('pickerList').innerHTML=ops.map(o=>`<div class="picker-row" onclick="sp('${o.replace(/'/g,"\\'")}')">${type==='category'?'<div class="pick-dot" style="background:'+cc(o)+'"></div>':''}<span>${o}</span>${o===cur?'<span class="pick-check">✓</span>':''}</div>`).join('');document.getElementById('pickerModal').classList.add('show')}
+function openPicker(type,sub){pT=type;pS=sub||'';const ops=type==='account'?ga():ct==='income'?INC_CATS:CATS;const cur=sub==='from'?document.getElementById('txFromBtn').textContent:sub==='to'?document.getElementById('txToBtn').textContent:type==='account'?document.getElementById('txAcctBtn').textContent:document.getElementById('txCatBtn').textContent;document.getElementById('pickerTitle').textContent=type==='account'?'选择账户':'选择分类';document.getElementById('pickerList').innerHTML=ops.map(o=>`<div class="picker-row" onclick="sp('${o.replace(/'/g,"\\'")}')">${type==='category'?'<div class="pick-dot" style="background:'+cc(o)+'"></div>':''}<span>${o}</span>${o===cur?'<span class="pick-check">✓</span>':''}</div>`).join('');document.getElementById('pickerModal').classList.add('show')}
 function sp(v){if(pT==='account'){if(pS==='from')document.getElementById('txFromBtn').textContent=v;else if(pS==='to')document.getElementById('txToBtn').textContent=v;else{document.getElementById('txAcctBtn').textContent=v;document.getElementById('txAcctBtn').classList.add('selected')}}else{document.getElementById('txCatBtn').textContent=v;document.getElementById('txCatBtn').classList.add('selected')}closePicker()}
 function closePicker(){document.getElementById('pickerModal').classList.remove('show')}
 
@@ -693,25 +702,27 @@ function closeMore(){document.getElementById('moreModal').classList.remove('show
 
 // ── Background stored in IndexedDB (no size limit) ──
 function bgDB(){return new Promise((r,j)=>{const q=indexedDB.open('minis_bg',1);q.onupgradeneeded=()=>q.result.createObjectStore('bg');q.onsuccess=()=>r(q.result);q.onerror=()=>j(q.error)})}
-async function saveBg(img,fit,color){const d=await bgDB();const t=d.transaction('bg','readwrite');const s=t.objectStore('bg');s.put(img,'img');s.put(fit,'fit');s.put(color,'color');return new Promise(r=>{t.oncomplete=r})}
-async function loadBgData(){try{const d=await bgDB();const t=d.transaction('bg','readonly');const s=t.objectStore('bg');const img=s.get('img'),fit=s.get('fit'),color=s.get('color');return new Promise(r=>{let i=null,f='cover',c='';img.onsuccess=()=>{i=img.result};fit.onsuccess=()=>{f=fit.result||'cover'};color.onsuccess=()=>{c=color.result||''};t.oncomplete=()=>r({img:i,fit:f,color:c})})}catch(e){return {img:null,fit:'cover',color:''}}}
+async function saveBg(img,fit,color,overlay){const d=await bgDB();const t=d.transaction('bg','readwrite');const s=t.objectStore('bg');s.put(img,'img');s.put(fit,'fit');s.put(color,'color');s.put(overlay,'overlay');return new Promise(r=>{t.oncomplete=r})}
+async function loadBgData(){try{const d=await bgDB();const t=d.transaction('bg','readonly');const s=t.objectStore('bg');const img=s.get('img'),fit=s.get('fit'),color=s.get('color'),overlay=s.get('overlay');return new Promise(r=>{let i=null,f='cover',c='',o=35;img.onsuccess=()=>{i=img.result};fit.onsuccess=()=>{f=fit.result||'cover'};color.onsuccess=()=>{c=color.result||''};overlay.onsuccess=()=>{o=overlay.result!=null?overlay.result:35};t.oncomplete=()=>r({img:i,fit:f,color:c,overlay:o})})}catch(e){return {img:null,fit:'cover',color:'',overlay:35}}}
 async function delBg(){try{const d=await bgDB();const t=d.transaction('bg','readwrite');t.objectStore('bg').clear();return new Promise(r=>{t.oncomplete=r})}catch(e){}}
-function applyBgLayer(img,fit,color){
+function applyBgLayer(img,fit,color,overlay){
   const r=document.documentElement;
   r.style.setProperty('--bg-img',img?`url(${img})`:'none');
   r.style.setProperty('--bg-size',fit||'cover');
   r.style.setProperty('--bg-color',color||'transparent');
+  r.style.setProperty('--bg-overlay',`rgba(255,255,255,${(overlay??35)/100})`);
 }
 let pbg=null;
 function openBgModal(){
   pbg=null;
   loadBgData().then(d=>{
-    const fit=document.getElementById('bgFit');
-    fit.value=d.fit||'cover';
+    document.getElementById('bgFit').value=d.fit||'cover';
     const colorC=document.getElementById('bgColor');
     const colorT=document.getElementById('bgColorHex');
     colorC.value=d.color||'#f8f6f2';
     colorT.value=d.color||'#f8f6f2';
+    document.getElementById('bgOverlay').value=d.overlay??35;
+    document.getElementById('bgOverlayVal').textContent=(d.overlay??35)+'%';
     pbg=d.img||null;
     previewBg();
     document.getElementById('bgModal').classList.add('show');
@@ -719,15 +730,16 @@ function openBgModal(){
 }
 function closeBgModal(){document.getElementById('bgModal').classList.remove('show')}
 function previewBg(){
-  const img=pbg;
-  const fit=document.getElementById('bgFit').value;
-  const color=document.getElementById('bgColor').value;
+  const img=pbg,fit=document.getElementById('bgFit').value,color=document.getElementById('bgColor').value,ov=parseInt(document.getElementById('bgOverlay').value)||0;
+  document.getElementById('bgOverlayVal').textContent=ov+'%';
   const p=document.getElementById('bgPreview');
   p.style.backgroundImage=img?`url(${img})`:'none';
   p.style.backgroundSize=fit;
   p.style.backgroundColor=color;
   p.style.backgroundPosition='center';
   p.style.backgroundRepeat='no-repeat';
+  // Show overlay on preview
+  p.style.boxShadow=ov>0?`inset 0 0 0 999px rgba(255,255,255,${ov/100})`:'none';
 }
 function handleBgUpload(i){
   const f=i.files[0];if(!f)return;
@@ -754,28 +766,21 @@ function handleBgUpload(i){
 }
 async function applyBg(){
   if(!pbg)return ts('请先选择图片');
-  const fit=document.getElementById('bgFit').value;
-  const color=document.getElementById('bgColor').value;
-  try{
-    await saveBg(pbg,fit,color);
-  }catch(e){
-    return ts('保存失败，请重试');
-  }
-  applyBgLayer(pbg,fit,color);
-  closeBgModal();
-  ts('已更新');
+  const fit=document.getElementById('bgFit').value,color=document.getElementById('bgColor').value,ov=parseInt(document.getElementById('bgOverlay').value)||0;
+  try{await saveBg(pbg,fit,color,ov)}catch(e){return ts('保存失败，请重试')}
+  applyBgLayer(pbg,fit,color,ov);closeBgModal();ts('已更新');
 }
 async function restoreBg(){
   pbg=null;
   await delBg();
-  applyBgLayer(null,'cover','');
+  applyBgLayer(null,'cover','',35);
   document.getElementById('bgPreview').style.backgroundImage='none';
   document.getElementById('bgPreview').style.backgroundColor='var(--bg)';
   document.getElementById('bgFile').value='';
   ts('已恢复');
 }
 function backupData(){loadBgData().then(bg=>{const d={tx:atx(),budget:gb(),accts:ga(),bg:bg};const b=new Blob([JSON.stringify(d)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='记账备份_'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);ts('已下载')})}
-function restoreData(){const i=document.createElement('input');i.type='file';i.accept='.json';i.onchange=function(){const f=i.files[0];if(!f)return;const r=new FileReader();r.onload=async function(){try{const d=JSON.parse(r.result);if(d.tx){const cur=atx(),ids=new Set(cur.map(t=>t.id));let added=0;d.tx.forEach(t=>{if(!ids.has(t.id)){cur.push(t);ids.add(t.id);added++}});stx(cur)}if(d.budget)sb(d.budget);if(d.accts)sa(d.accts);if(d.bg&&d.bg.img){await saveBg(d.bg.img,d.bg.fit||'cover',d.bg.color||'')}else await delBg();location.reload()}catch(e){ts('无效备份')}};r.readAsText(f)};i.click()}
+function restoreData(){const i=document.createElement('input');i.type='file';i.accept='.json';i.onchange=function(){const f=i.files[0];if(!f)return;const r=new FileReader();r.onload=async function(){try{const d=JSON.parse(r.result);if(d.tx){const cur=atx(),ids=new Set(cur.map(t=>t.id));let added=0;d.tx.forEach(t=>{if(!ids.has(t.id)){cur.push(t);ids.add(t.id);added++}});stx(cur)}if(d.budget)sb(d.budget);if(d.accts)sa(d.accts);if(d.bg&&d.bg.img){await saveBg(d.bg.img,d.bg.fit||'cover',d.bg.color||'',d.bg.overlay??35)}else await delBg();location.reload()}catch(e){ts('无效备份')}};r.readAsText(f)};i.click()}
 function importCSV(){const i=document.createElement('input');i.type='file';i.accept='.csv,.txt';i.onchange=function(){const f=i.files[0];if(!f)return;const r=new FileReader();r.onload=function(){try{let raw=r.result;if(raw.charCodeAt(0)===0xFEFF)raw=raw.slice(1);const lines=raw.replace(/\r/g,'').split('\n').filter(l=>l.trim());if(lines.length<2)return ts('文件为空');const d=atx(),ids=new Set(d.map(t=>t.id));let added=0,skipped=0;lines.slice(1).forEach(l=>{const c=parseCSVLine(l);const amt=parseFloat(c[2]);const date=c[0]&&c[0].match(/^\d{4}-\d{2}-\d{2}/)?c[0]:'';if(c.length>=3&&date&&!isNaN(amt)&&amt>0){d.push({id:uid(),time:date+'T12:00:00',type:c[1].includes('收入')?'income':'expense',amount:amt,note:c[3]||'',account:c[4]||'',category:c[5]||''});added++}else skipped++});stx(d);ra();ts(added?'导入 '+added+' 条'+(skipped?'，跳过 '+skipped+' 行':''):'未导入：请确认格式为 日期,类型,金额,备注,账户,分类')}catch(e){ts('格式错误')}};r.readAsText(f)};i.click()}
 function parseCSVLine(line){const r=[];let cur='',inQ=false;for(let i=0;i<line.length;i++){const ch=line[i];if(inQ){if(ch==='"'){if(line[i+1]==='"'){cur+='"';i++}else inQ=false}else cur+=ch}else{if(ch===','){r.push(cur.trim());cur=''}else if(ch==='"')inQ=true;else cur+=ch}}r.push(cur.trim());return r}
 function exportCSV(){const tx=atx();if(!tx.length)return ts('无数据');const h='日期,类型,金额,备注,账户,分类',rows=tx.map(t=>[t.time.slice(0,10),t.type==='expense'?'支出':'收入',t.amount.toFixed(2),t.note||'',t.account||'',t.category||''].join(','));const b=new Blob(['\ufeff'+[h,...rows].join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='记账_'+cm+'.csv';a.click();URL.revokeObjectURL(a.href);ts('已导出')}
@@ -844,11 +849,18 @@ function doImportConfirm(){
 }
 
 // ── Init ──
+// Keyboard-aware sheet positioning
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize',()=>{
+    const kb=window.innerHeight-window.visualViewport.height;
+    document.querySelectorAll('.sheet').forEach(s=>s.style.setProperty('--kb',Math.max(0,kb)+'px'));
+  });
+}
 (async function(){
   // Migrate from localStorage to IndexedDB (one-time)
   const old=localStorage.getItem('minis_bg_v1');
   if(old){try{await saveBg(old,localStorage.getItem('minis_bg_fit')||'cover','');localStorage.removeItem('minis_bg_v1');localStorage.removeItem('minis_bg_fit')}catch(e){}}
-  const d=await loadBgData();if(d.img){applyBgLayer(d.img,d.fit,d.color)}
+  const d=await loadBgData();if(d.img){applyBgLayer(d.img,d.fit,d.color,d.overlay)}
 })();
 document.querySelectorAll('.modal').forEach(m=>m.addEventListener('click',function(e){if(e.target===this){m.classList.remove('show');eid=null}}));
 ra();
