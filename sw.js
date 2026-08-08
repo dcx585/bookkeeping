@@ -1,4 +1,4 @@
-const CACHE='bookkeeping-v3';
+const CACHE='bookkeeping-v4';
 const URLS=['./','./app.html','./manifest.json','./icon.svg'];
 
 self.addEventListener('install',e=>{
@@ -10,8 +10,10 @@ self.addEventListener('activate',e=>{
 });
 
 self.addEventListener('fetch',e=>{
-  e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{
-    if(res.ok){const rc=res.clone();caches.open(CACHE).then(c=>c.put(e.request,rc))}
-    return res;
-  })));
+  e.respondWith(
+    fetch(e.request).then(res=>{
+      if(res.ok){const rc=res.clone();caches.open(CACHE).then(c=>c.put(e.request,rc))}
+      return res;
+    }).catch(()=>caches.match(e.request))
+  );
 });
