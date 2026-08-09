@@ -275,8 +275,10 @@ body{
 </div>
 
 <div class="stats-view" id="acctsView">
-  <div class="stats-section"><h3>账户余额</h3><div class="acct-list" id="acctList"></div></div>
+  <div class="stats-section"><h3>现金账户</h3><div class="acct-list" id="acctList"></div></div>
   <div style="padding:0"><button class="tab-btn" onclick="openAddAcct()" style="width:auto;padding:10px 24px;font-size:14px;margin-top:8px;color:var(--text);border:1px solid var(--border);background:var(--surface)">+ 添加账户</button></div>
+  <div class="stats-section"><h3>理财账户（手动更新）</h3><div class="acct-list" id="invList"></div></div>
+  <div class="stats-section"><div class="acct-list" id="totalRow" style="border-top:2px solid var(--accent)"></div></div>
 </div>
 
   </div>
@@ -382,6 +384,14 @@ body{
   </div>
 </div>
 
+<div class="modal" id="invEditModal">
+  <div class="sheet"><h3 id="invEditTitle">更新理财</h3>
+    <input type="number" id="invEditAmount" placeholder="金额" step="0.01" inputmode="decimal">
+    <button class="submit" onclick="saveInvEdit()">更新</button>
+    <button class="cancel-btn" onclick="closeInvEdit()">取消</button>
+  </div>
+</div>
+
 <div class="modal" id="dividendModal">
   <div class="sheet"><h3>股息率</h3>
     <input type="number" id="divPrice" placeholder="当前股价（元）" step="0.01" inputmode="decimal">
@@ -437,7 +447,7 @@ body{
 })();
 
 // ── State ──
-const SK='minis_bookkeeping_v5',BK='minis_budget_v3',AK='minis_accounts_v2',BGK='minis_bg_v1';
+const SK='minis_bookkeeping_v5',BK='minis_budget_v3',AK='minis_accounts_v2',BGK='minis_bg_v1',IK='minis_invest_v1';
 let cm=new Date().toISOString().slice(0,7),ct='expense',cv='tx',eid=null,sq='';
 const DA=['微信','银行卡','应急金','花呗'];
 const CATS=['餐饮/早午晚餐','餐饮/水果零食','餐饮/饮料','购物/日用品','购物/化妆护肤','医疗/挂号门诊','医疗/药品','交通/打车','交通/公共交通','固定支出/话费','固定支出/家里生活费','其他'];
@@ -453,11 +463,32 @@ function ga(){return JSON.parse(localStorage.getItem(AK)||JSON.stringify(DA))}
 function sa(d){localStorage.setItem(AK,JSON.stringify(d))}
 function mtx(){return atx().filter(t=>t.time.slice(0,7)===cm).sort((a,b)=>b.time.localeCompare(a.time))}
 
+// ── Investment accounts ──
+const DI=['场内-我的','场外-我的','场外-别人的'];
+function gi(){return JSON.parse(localStorage.getItem(IK)||JSON.stringify(DI.map(n=>({name:n,amount:0,month:''}))))}
+function si(d){localStorage.setItem(IK,JSON.stringify(d))}
+let invEditName='';
+function openInvEdit(name){
+  invEditName=name;const a=gi().find(x=>x.name===name);
+  document.getElementById('invEditTitle').textContent=name;
+  document.getElementById('invEditAmount').value=a?a.amount:'';
+  document.getElementById('invEditModal').classList.add('show');
+}
+function closeInvEdit(){document.getElementById('invEditModal').classList.remove('show');invEditName=''}
+function saveInvEdit(){
+  const v=parseFloat(document.getElementById('invEditAmount').value);
+  if(isNaN(v))return ts('请输入有效金额');
+  const d=gi(),a=d.find(x=>x.name===invEditName);
+  if(a){a.amount=v;a.month=new Date().toISOString().slice(0,7)}else d.push({name:invEditName,amount:v,month:new Date().toISOString().slice(0,7)});
+  si(d);closeInvEdit();rac();ts(invEditName+' 已更新');
+}
+
 // ── Init budgets ──
 // Migrate old subcategory budgets → top-level
 (()=>{const b=gb(),keys=Object.keys(b);if(keys.length>0&&keys[0].includes('/')){const g={};keys.forEach(k=>{const t=k.split('/')[0];if(!g[t])g[t]={budget:b[k].budget||0,recurring:false};g[t].recurring=g[t].recurring||b[k].recurring});sb(g)}})();
 (()=>{if(!localStorage.getItem(BK)){const d={};['餐饮','购物','交通','固定支出','医疗'].forEach(c=>{d[c]={budget:c==='餐饮'?800:c==='购物'?400:c==='交通'?200:c==='固定支出'?600:500,recurring:false}});sb(d)}})();
 (()=>{if(!localStorage.getItem(AK))sa(DA)})();
+(()=>{if(!localStorage.getItem(IK))si(DI.map(n=>({name:n,amount:0,month:''})))})();
 
 // ── Panel ──
 const panel=document.getElementById('panel'),panelBody=document.getElementById('panelBody');
@@ -546,14 +577,31 @@ function rac(){
     if(t.type==='transfer'){const fee=t.fee||0,fp=t.feePayer||'from';am[t.from]=(am[t.from]||0)-t.amount-(fp==='from'?fee:0);am[t.to]=(am[t.to]||0)+t.amount-(fp==='to'?fee:0)}
     else if(t.account)am[t.account]=(am[t.account]||0)+(t.type==='income'?t.amount:-t.amount);
   });
+  let cashTotal=0;
   document.getElementById('acctList').innerHTML=ga().map(a=>{
-    const v=am[a]||0;
+    const v=am[a]||0;cashTotal+=v;
     return `<div class="acct-item">
       <span class="acct-name">${a}</span>
       <span class="acct-val" style="color:${v<0?'var(--red)':'var(--green)'}">¥${v.toFixed(2)}</span>
       ${DA.includes(a)?'':'<span style="color:var(--text3);margin-left:8px;cursor:pointer;font-size:11px" onclick="event.stopPropagation();deleteAcct(\''+a+'\')">删除</span>'}
     </div>`;
   }).join('');
+  // Investment accounts
+  const inv=gi();let invTotal=0;
+  document.getElementById('invList').innerHTML=inv.map(a=>{
+    invTotal+=a.amount||0;
+    const m=a.month?`<span style="font-size:11px;color:var(--text3);margin-left:4px">${a.month}</span>`:'<span style="font-size:11px;color:var(--gold);margin-left:4px">未更新</span>';
+    return `<div class="acct-item" onclick="openInvEdit('${a.name}')" style="cursor:pointer">
+      <span class="acct-name">${a.name}${m}</span>
+      <span class="acct-val" style="color:${a.amount>0?'var(--green)':'var(--text2)'}">¥${(a.amount||0).toLocaleString()}</span>
+    </div>`;
+  }).join('');
+  // Total row
+  const grand=cashTotal+invTotal;
+  document.getElementById('totalRow').innerHTML=`<div class="acct-item" style="font-weight:700;border-bottom:none">
+    <span class="acct-name">总资产</span>
+    <span class="acct-val" style="color:var(--accent);font-size:16px">¥${grand.toLocaleString()}</span>
+  </div>`;
 }
 
 function switchView(v){cv=v;document.querySelectorAll('.tab-btn').forEach(t=>t.classList.remove('active'));document.querySelector(`.tab-btn:nth-child(${v==='tx'?1:v==='stats'?2:3})`).classList.add('active');document.getElementById('txList').style.display=v==='tx'?'block':'none';document.getElementById('statsView').classList.toggle('show',v==='stats');document.getElementById('acctsView').classList.toggle('show',v==='accts');document.getElementById('fab').style.display=v==='tx'?'block':'none';if(v==='stats')rss();if(v==='accts')rac()}
