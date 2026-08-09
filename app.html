@@ -97,7 +97,7 @@ body{
   margin:10px auto 12px;flex-shrink:0;transition:opacity .3s;
 }
 .panel.open .panel-handle{opacity:0}
-.panel-body{flex:1;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;padding-bottom:90px;-webkit-overflow-scrolling:touch}
+.panel-body{flex:1;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;padding-bottom:60px;-webkit-overflow-scrolling:touch;background:rgba(255,255,255,.55);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
 
 /* ── Header ── */
 .header{padding:8px 20px 16px;position:relative;z-index:2}
@@ -105,7 +105,7 @@ body{
 .header .month-row{display:flex;align-items:center;gap:6px}
 .header .month-row button{width:32px;height:32px;border:none;background:transparent;font-size:18px;color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center}
 .header .month-label{font-size:15px;font-weight:600;min-width:80px;text-align:center;color:var(--text)}
-.header .balance{font-size:52px;font-weight:800;letter-spacing:-.03em;line-height:1;text-align:center;font-feature-settings:"tnum";font-variant-numeric:tabular-nums;margin-bottom:4px}
+.header .balance{font-size:52px;font-weight:800;letter-spacing:-.03em;line-height:1;text-align:center;font-feature-settings:"tnum";font-variant-numeric:tabular-nums;margin-bottom:4px;text-shadow:0 1px 3px rgba(255,255,255,.6)}
 .header .balance-label{font-size:10px;color:var(--gold);letter-spacing:.1em;text-transform:uppercase;text-align:center;font-weight:500}
 
 /* ── Summary ── */
@@ -184,7 +184,7 @@ body{
 .fab:active{transform:scale(.94)}
 
 /* ── Bottom bar ── */
-.bottom-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:420px;z-index:10;padding:8px 16px calc(8px + env(safe-area-inset-bottom));display:flex;gap:6px}
+.bottom-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:420px;z-index:10;padding:8px 16px calc(8px + env(safe-area-inset-bottom));display:flex;gap:6px;background:rgba(255,255,255,.65);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 .bottom-bar button{flex:1;padding:10px 8px;border-radius:10px;border:1px solid var(--border);background:var(--surface);font-size:12px;color:var(--text);font-weight:500;cursor:pointer;transition:all .15s;font-family:inherit}
 .bottom-bar button:active{background:var(--bg)}
 
@@ -606,12 +606,28 @@ function openBudgetSettings(){
 function addCustomBudget(){
   const n=prompt('预算名称（如：教育、娱乐）：');if(!n||!n.trim())return;
   const a=parseFloat(prompt('预算金额：'));if(isNaN(a)||a<=0)return ts('请输入有效金额');
-  const b=gb();b[n.trim()]={budget:a,recurring:false};sb(b);
-  openBudgetSettings();ts('已添加 '+n.trim());
+  const b=gb();const name=n.trim();
+  if(b[name]){if(!confirm('"'+name+'" 已存在，覆盖？'))return}
+  b[name]={budget:a,recurring:false};sb(b);
+  // Append to DOM directly — don't rebuild (would lose unsaved edits)
+  const list=document.getElementById('budgetSettingsList');
+  const addBtn=list.querySelector('button:last-child');
+  const row=document.createElement('div');
+  row.innerHTML=`<span style="width:60px;flex-shrink:0;color:var(--text);font-weight:500">${name}</span>
+    <input type="number" value="${a}" placeholder="预算" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;min-width:0" data-cat="${name}" data-field="budget">
+    <label style="display:flex;align-items:center;gap:3px;font-size:12px;color:var(--text2);white-space:nowrap"><input type="checkbox" data-cat="${name}" data-field="recurring"> 固定</label>
+    <span onclick="deleteBudgetItem('${name.replace(/'/g,"\\'")}')" style="color:var(--text3);cursor:pointer;font-size:16px;padding:0 4px;flex-shrink:0">×</span>`;
+  row.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:13px';
+  list.insertBefore(row,addBtn);
+  ts('已添加 '+name);
 }
 function deleteBudgetItem(cat){
   if(!confirm('删除 "'+cat+'" 预算？'))return;
-  const b=gb();delete b[cat];sb(b);openBudgetSettings();ts('已删除');
+  const b=gb();delete b[cat];sb(b);
+  // Remove row from DOM instead of rebuilding
+  const row=document.querySelector(`#budgetSettingsList input[data-cat="${cat.replace(/"/g,'&quot;')}"]`)?.parentElement;
+  if(row)row.remove();
+  ts('已删除');
 }
 function closeBudgetSettings(){document.getElementById('budgetSettingsModal').classList.remove('show')}
 function saveBudgetSettings(){
