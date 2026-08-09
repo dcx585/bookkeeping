@@ -326,11 +326,19 @@ body{
       <button class="cancel-btn" onclick="openBudgetSettings();closeMore()" style="margin:0">📊 预算设置</button>
       <button class="cancel-btn" onclick="backupData();closeMore()" style="margin:0">💾 备份</button>
       <button class="cancel-btn" onclick="restoreData();closeMore()" style="margin:0">📥 恢复</button>
-      <button class="cancel-btn" onclick="importCSV();closeMore()" style="margin:0">📤 导入CSV</button>
+      <button class="cancel-btn" onclick="openExportCSV();closeMore()" style="margin:0">📤 导出CSV</button>
       <button class="cancel-btn" onclick="importFromClipboard();closeMore()" style="margin:0">📋 从剪贴板导入</button>
       <button class="cancel-btn" onclick="openImportNotify();closeMore()" style="margin:0">📲 导入通知</button>
     </div>
     <button class="cancel-btn" onclick="closeMore()" style="margin-top:8px">关闭</button>
+  </div>
+</div>
+
+<div class="modal" id="exportCSVModal">
+  <div class="sheet"><h3>导出 CSV</h3>
+    <div style="display:flex;gap:10px;margin-bottom:6px"><div style="flex:1"><span style="font-size:13px;color:var(--text2)">开始日期</span><input type="date" id="exportStart" style="margin:4px 0 0"></div><div style="flex:1"><span style="font-size:13px;color:var(--text2)">结束日期</span><input type="date" id="exportEnd" style="margin:4px 0 0"></div></div>
+    <button class="submit" onclick="exportCSVRange()">导出</button>
+    <button class="cancel-btn" onclick="closeExportCSV()">取消</button>
   </div>
 </div>
 
@@ -800,6 +808,23 @@ function restoreData(){const i=document.createElement('input');i.type='file';i.a
 function importCSV(){const i=document.createElement('input');i.type='file';i.accept='.csv,.txt';i.onchange=function(){const f=i.files[0];if(!f)return;const r=new FileReader();r.onload=function(){try{let raw=r.result;if(raw.charCodeAt(0)===0xFEFF)raw=raw.slice(1);const lines=raw.replace(/\r/g,'').split('\n').filter(l=>l.trim());if(lines.length<2)return ts('文件为空');const d=atx(),ids=new Set(d.map(t=>t.id));let added=0,skipped=0;lines.slice(1).forEach(l=>{const c=parseCSVLine(l);const amt=parseFloat(c[2]);const date=c[0]&&c[0].match(/^\d{4}-\d{2}-\d{2}/)?c[0]:'';if(c.length>=3&&date&&!isNaN(amt)&&amt>0){d.push({id:uid(),time:date+'T12:00:00',type:c[1].includes('收入')?'income':'expense',amount:amt,note:c[3]||'',account:c[4]||'',category:c[5]||''});added++}else skipped++});stx(d);ra();ts(added?'导入 '+added+' 条'+(skipped?'，跳过 '+skipped+' 行':''):'未导入：请确认格式为 日期,类型,金额,备注,账户,分类')}catch(e){ts('格式错误')}};r.readAsText(f)};i.click()}
 function parseCSVLine(line){const r=[];let cur='',inQ=false;for(let i=0;i<line.length;i++){const ch=line[i];if(inQ){if(ch==='"'){if(line[i+1]==='"'){cur+='"';i++}else inQ=false}else cur+=ch}else{if(ch===','){r.push(cur.trim());cur=''}else if(ch==='"')inQ=true;else cur+=ch}}r.push(cur.trim());return r}
 function exportCSV(){const tx=atx();if(!tx.length)return ts('无数据');const h='日期,类型,金额,备注,账户,分类',rows=tx.map(t=>[t.time.slice(0,10),t.type==='expense'?'支出':'收入',t.amount.toFixed(2),t.note||'',t.account||'',t.category||''].join(','));const b=new Blob(['\ufeff'+[h,...rows].join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='记账_'+cm+'.csv';a.click();URL.revokeObjectURL(a.href);ts('已导出')}
+function openExportCSV(){
+  const min=atx().reduce((a,t)=>{const d=t.time.slice(0,10);return!a||d<a?d:a},'');
+  document.getElementById('exportStart').value=cm+'-01';
+  document.getElementById('exportEnd').value=new Date().toISOString().slice(0,10);
+  document.getElementById('exportCSVModal').classList.add('show');
+}
+function closeExportCSV(){document.getElementById('exportCSVModal').classList.remove('show')}
+function exportCSVRange(){
+  const s=document.getElementById('exportStart').value,e=document.getElementById('exportEnd').value;
+  if(!s||!e)return ts('请选择起止日期');
+  const tx=atx().filter(t=>t.time.slice(0,10)>=s&&t.time.slice(0,10)<=e);
+  if(!tx.length)return ts('该时间段无数据');
+  const h='日期,类型,金额,备注,账户,分类',rows=tx.map(t=>[t.time.slice(0,10),t.type==='expense'?'支出':'收入',t.amount.toFixed(2),t.note||'',t.account||'',t.category||''].join(','));
+  const b=new Blob(['\ufeff'+[h,...rows].join('\n')],{type:'text/csv'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`记账_${s}_${e}.csv`;a.click();URL.revokeObjectURL(a.href);
+  closeExportCSV();ts(`已导出 ${tx.length} 条`);
+}
 function ts(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('show'),2000)}
 
 // ── 剪贴板导入 ──
