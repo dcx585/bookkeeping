@@ -23,7 +23,7 @@
   --bg-img:none;
   --bg-size:cover;
   --bg-color:transparent;
-  --bg-overlay:rgba(255,255,255,0.35);
+  --bg-overlay:rgba(255,255,255,0.2);
 }
 body{
   font:-apple-system-body,"PingFang SC","Noto Sans SC",sans-serif;
@@ -97,7 +97,7 @@ body{
   margin:10px auto 12px;flex-shrink:0;transition:opacity .3s;
 }
 .panel.open .panel-handle{opacity:0}
-.panel-body{flex:1;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;padding-bottom:60px;-webkit-overflow-scrolling:touch;background:rgba(255,255,255,.7)}
+.panel-body{flex:1;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;padding-bottom:60px;-webkit-overflow-scrolling:touch;background:rgba(248,246,242,.92)}
 
 /* ── Header ── */
 .header{padding:8px 20px 16px;position:relative;z-index:2}
@@ -105,7 +105,7 @@ body{
 .header .month-row{display:flex;align-items:center;gap:6px}
 .header .month-row button{width:32px;height:32px;border:none;background:transparent;font-size:18px;color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center}
 .header .month-label{font-size:15px;font-weight:600;min-width:80px;text-align:center;color:var(--text)}
-.header .balance{font-size:52px;font-weight:800;letter-spacing:-.03em;line-height:1;text-align:center;font-feature-settings:"tnum";font-variant-numeric:tabular-nums;margin-bottom:4px;text-shadow:0 1px 3px rgba(255,255,255,.6)}
+.header .balance{font-size:52px;font-weight:800;letter-spacing:-.03em;line-height:1;text-align:center;font-feature-settings:"tnum";font-variant-numeric:tabular-nums;margin-bottom:4px}
 .header .balance-label{font-size:10px;color:var(--gold);letter-spacing:.1em;text-transform:uppercase;text-align:center;font-weight:500}
 
 /* ── Summary ── */
@@ -360,7 +360,7 @@ body{
     <div id="bgPreview" style="width:100%;height:100px;border-radius:10px;background:var(--bg) center/cover;border:1px solid var(--border);margin-bottom:10px"></div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px"><span style="color:var(--text2)">显示方式：</span><select id="bgFit" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;background:var(--surface)" onchange="previewBg()"><option value="cover">填满屏幕（裁剪）</option><option value="contain">完整显示（留边）</option></select></div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px"><span style="color:var(--text2);white-space:nowrap">底色：</span><input type="color" id="bgColor" value="#f8f6f2" style="width:36px;height:32px;border:1px solid var(--border);border-radius:6px;cursor:pointer;padding:2px" onchange="previewBg()"><input type="text" id="bgColorHex" value="#f8f6f2" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;background:var(--surface)" oninput="document.getElementById('bgColor').value=this.value;previewBg()"></div>
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px"><span style="color:var(--text2);white-space:nowrap">遮罩：</span><input type="range" id="bgOverlay" min="0" max="80" value="35" style="flex:1" oninput="previewBg()"><span id="bgOverlayVal" style="font-size:12px;color:var(--text2);min-width:30px;text-align:right">35%</span></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px"><span style="color:var(--text2);white-space:nowrap">遮罩：</span><input type="range" id="bgOverlay" min="0" max="80" value="20" style="flex:1" oninput="previewBg()"><span id="bgOverlayVal" style="font-size:12px;color:var(--text2);min-width:30px;text-align:right">35%</span></div>
     <label style="display:block;padding:10px;border:1px solid var(--accent);border-radius:10px;text-align:center;font-size:14px;cursor:pointer;margin-bottom:8px">选择图片<input type="file" id="bgFile" accept="image/*" style="display:none" onchange="handleBgUpload(this)"></label>
     <button class="submit" onclick="applyBg()">应用</button>
     <button class="cancel-btn" onclick="restoreBg()">恢复默认</button>
@@ -777,14 +777,14 @@ function closeMore(){document.getElementById('moreModal').classList.remove('show
 // ── Background stored in IndexedDB (no size limit) ──
 function bgDB(){return new Promise((r,j)=>{const q=indexedDB.open('minis_bg',1);q.onupgradeneeded=()=>q.result.createObjectStore('bg');q.onsuccess=()=>r(q.result);q.onerror=()=>j(q.error)})}
 async function saveBg(img,fit,color,overlay){const d=await bgDB();const t=d.transaction('bg','readwrite');const s=t.objectStore('bg');s.put(img,'img');s.put(fit,'fit');s.put(color,'color');s.put(overlay,'overlay');return new Promise(r=>{t.oncomplete=r})}
-async function loadBgData(){try{const d=await bgDB();const t=d.transaction('bg','readonly');const s=t.objectStore('bg');const img=s.get('img'),fit=s.get('fit'),color=s.get('color'),overlay=s.get('overlay');return new Promise(r=>{let i=null,f='cover',c='',o=35;img.onsuccess=()=>{i=img.result};fit.onsuccess=()=>{f=fit.result||'cover'};color.onsuccess=()=>{c=color.result||''};overlay.onsuccess=()=>{o=overlay.result!=null?overlay.result:35};t.oncomplete=()=>r({img:i,fit:f,color:c,overlay:o})})}catch(e){return {img:null,fit:'cover',color:'',overlay:35}}}
+async function loadBgData(){try{const d=await bgDB();const t=d.transaction('bg','readonly');const s=t.objectStore('bg');const img=s.get('img'),fit=s.get('fit'),color=s.get('color'),overlay=s.get('overlay');return new Promise(r=>{let i=null,f='cover',c='',o=20;img.onsuccess=()=>{i=img.result};fit.onsuccess=()=>{f=fit.result||'cover'};color.onsuccess=()=>{c=color.result||''};overlay.onsuccess=()=>{o=overlay.result!=null?overlay.result:20};t.oncomplete=()=>r({img:i,fit:f,color:c,overlay:o})})}catch(e){return {img:null,fit:'cover',color:'',overlay:20}}}
 async function delBg(){try{const d=await bgDB();const t=d.transaction('bg','readwrite');t.objectStore('bg').clear();return new Promise(r=>{t.oncomplete=r})}catch(e){}}
 function applyBgLayer(img,fit,color,overlay){
   const r=document.documentElement;
   r.style.setProperty('--bg-img',img?`url(${img})`:'none');
   r.style.setProperty('--bg-size',fit||'cover');
   r.style.setProperty('--bg-color',color||'transparent');
-  r.style.setProperty('--bg-overlay',`rgba(255,255,255,${(overlay??35)/100})`);
+  r.style.setProperty('--bg-overlay',`rgba(255,255,255,${(overlay??20)/100})`);
 }
 let pbg=null;
 function openBgModal(){
@@ -795,8 +795,8 @@ function openBgModal(){
     const colorT=document.getElementById('bgColorHex');
     colorC.value=d.color||'#f8f6f2';
     colorT.value=d.color||'#f8f6f2';
-    document.getElementById('bgOverlay').value=d.overlay??35;
-    document.getElementById('bgOverlayVal').textContent=(d.overlay??35)+'%';
+    document.getElementById('bgOverlay').value=d.overlay??20;
+    document.getElementById('bgOverlayVal').textContent=(d.overlay??20)+'%';
     pbg=d.img||null;
     previewBg();
     document.getElementById('bgModal').classList.add('show');
@@ -847,14 +847,14 @@ async function applyBg(){
 async function restoreBg(){
   pbg=null;
   await delBg();
-  applyBgLayer(null,'cover','',35);
+  applyBgLayer(null,'cover','',20);
   document.getElementById('bgPreview').style.backgroundImage='none';
   document.getElementById('bgPreview').style.backgroundColor='var(--bg)';
   document.getElementById('bgFile').value='';
   ts('已恢复');
 }
 function backupData(){loadBgData().then(bg=>{const d={tx:atx(),budget:gb(),accts:ga(),bg:bg};const b=new Blob([JSON.stringify(d)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='记账备份_'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);ts('已下载')})}
-function restoreData(){const i=document.createElement('input');i.type='file';i.accept='.json';i.onchange=function(){const f=i.files[0];if(!f)return;const r=new FileReader();r.onload=async function(){try{const d=JSON.parse(r.result);if(d.tx){const cur=atx(),ids=new Set(cur.map(t=>t.id));let added=0;d.tx.forEach(t=>{if(!ids.has(t.id)){cur.push(t);ids.add(t.id);added++}});stx(cur)}if(d.budget)sb(d.budget);if(d.accts)sa(d.accts);if(d.bg&&d.bg.img){await saveBg(d.bg.img,d.bg.fit||'cover',d.bg.color||'',d.bg.overlay??35)}else await delBg();location.reload()}catch(e){ts('无效备份')}};r.readAsText(f)};i.click()}
+function restoreData(){const i=document.createElement('input');i.type='file';i.accept='.json';i.onchange=function(){const f=i.files[0];if(!f)return;const r=new FileReader();r.onload=async function(){try{const d=JSON.parse(r.result);if(d.tx){const cur=atx(),ids=new Set(cur.map(t=>t.id));let added=0;d.tx.forEach(t=>{if(!ids.has(t.id)){cur.push(t);ids.add(t.id);added++}});stx(cur)}if(d.budget)sb(d.budget);if(d.accts)sa(d.accts);if(d.bg&&d.bg.img){await saveBg(d.bg.img,d.bg.fit||'cover',d.bg.color||'',d.bg.overlay??20)}else await delBg();location.reload()}catch(e){ts('无效备份')}};r.readAsText(f)};i.click()}
 function importCSV(){const i=document.createElement('input');i.type='file';i.accept='.csv,.txt';i.onchange=function(){const f=i.files[0];if(!f)return;const r=new FileReader();r.onload=function(){try{let raw=r.result;if(raw.charCodeAt(0)===0xFEFF)raw=raw.slice(1);const lines=raw.replace(/\r/g,'').split('\n').filter(l=>l.trim());if(lines.length<2)return ts('文件为空');const d=atx(),ids=new Set(d.map(t=>t.id));let added=0,skipped=0;lines.slice(1).forEach(l=>{const c=parseCSVLine(l);const amt=parseFloat(c[2]);const date=c[0]&&c[0].match(/^\d{4}-\d{2}-\d{2}/)?c[0]:'';if(c.length>=3&&date&&!isNaN(amt)&&amt>0){d.push({id:uid(),time:date+'T12:00:00',type:c[1].includes('收入')?'income':'expense',amount:amt,note:c[3]||'',account:c[4]||'',category:c[5]||''});added++}else skipped++});stx(d);ra();ts(added?'导入 '+added+' 条'+(skipped?'，跳过 '+skipped+' 行':''):'未导入：请确认格式为 日期,类型,金额,备注,账户,分类')}catch(e){ts('格式错误')}};r.readAsText(f)};i.click()}
 function parseCSVLine(line){const r=[];let cur='',inQ=false;for(let i=0;i<line.length;i++){const ch=line[i];if(inQ){if(ch==='"'){if(line[i+1]==='"'){cur+='"';i++}else inQ=false}else cur+=ch}else{if(ch===','){r.push(cur.trim());cur=''}else if(ch==='"')inQ=true;else cur+=ch}}r.push(cur.trim());return r}
 function exportCSV(){const tx=atx();if(!tx.length)return ts('无数据');const h='日期,类型,金额,备注,账户,分类',rows=tx.map(t=>[t.time.slice(0,10),t.type==='expense'?'支出':'收入',t.amount.toFixed(2),t.note||'',t.account||'',t.category||''].join(','));const b=new Blob(['\ufeff'+[h,...rows].join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='记账_'+cm+'.csv';a.click();URL.revokeObjectURL(a.href);ts('已导出')}
