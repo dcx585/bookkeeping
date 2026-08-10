@@ -464,7 +464,7 @@ function sa(d){localStorage.setItem(AK,JSON.stringify(d))}
 function mtx(){return atx().filter(t=>t.time.slice(0,7)===cm).sort((a,b)=>b.time.localeCompare(a.time))}
 
 // ── Investment accounts ──
-const DI=['场内-我的','场外-我的','场外-别人的'];
+const DI=[{name:'场内-我的',amount:0,month:'',ours:true},{name:'场外-我的',amount:0,month:'',ours:true},{name:'场外-别人的',amount:0,month:'',ours:false}];
 function gi(){return JSON.parse(localStorage.getItem(IK)||JSON.stringify(DI.map(n=>({name:n,amount:0,month:''}))))}
 function si(d){localStorage.setItem(IK,JSON.stringify(d))}
 let invEditName='';
@@ -488,7 +488,7 @@ function saveInvEdit(){
 (()=>{const b=gb(),keys=Object.keys(b);if(keys.length>0&&keys[0].includes('/')){const g={};keys.forEach(k=>{const t=k.split('/')[0];if(!g[t])g[t]={budget:b[k].budget||0,recurring:false};g[t].recurring=g[t].recurring||b[k].recurring});sb(g)}})();
 (()=>{if(!localStorage.getItem(BK)){const d={};['餐饮','购物','交通','固定支出','医疗'].forEach(c=>{d[c]={budget:c==='餐饮'?800:c==='购物'?400:c==='交通'?200:c==='固定支出'?600:500,recurring:false}});sb(d)}})();
 (()=>{if(!localStorage.getItem(AK))sa(DA)})();
-(()=>{if(!localStorage.getItem(IK))si(DI.map(n=>({name:n,amount:0,month:''})))})();
+(()=>{if(!localStorage.getItem(IK))si(DI)})();
 
 // ── Panel ──
 const panel=document.getElementById('panel'),panelBody=document.getElementById('panelBody');
@@ -589,10 +589,11 @@ function rac(){
   // Investment accounts
   const inv=gi();let invTotal=0;
   document.getElementById('invList').innerHTML=inv.map(a=>{
-    invTotal+=a.amount||0;
+    if(a.ours!==false)invTotal+=a.amount||0;
     const m=a.month?`<span style="font-size:11px;color:var(--text3);margin-left:4px">${a.month}</span>`:'<span style="font-size:11px;color:var(--gold);margin-left:4px">未更新</span>';
+    const tag=a.ours===false?'<span style="font-size:10px;color:var(--text3);margin-left:4px;background:var(--bg);padding:1px 5px;border-radius:8px">不计入</span>':'';
     return `<div class="acct-item" onclick="openInvEdit('${a.name}')" style="cursor:pointer">
-      <span class="acct-name">${a.name}${m}</span>
+      <span class="acct-name">${a.name}${tag}${m}</span>
       <span class="acct-val" style="color:${a.amount>0?'var(--green)':'var(--text2)'}">¥${(a.amount||0).toLocaleString()}</span>
     </div>`;
   }).join('');
@@ -956,13 +957,13 @@ document.querySelectorAll('.modal').forEach(m=>m.addEventListener('click',functi
 ra();
 // Fullscreen toggle
 function toggleFS(){if(!document.fullscreenElement){document.documentElement.requestFullscreen().then(()=>{lockOrientation()}).catch(()=>{ts('不支持全屏')})}else{document.exitFullscreen()}}
-// Lock to portrait; re-lock on visibility change (screen off/on)
+// Lock to portrait; re-lock on orientation change (handles screen off/on)
 function lockOrientation(){
   if(!document.fullscreenElement){document.documentElement.requestFullscreen().catch(()=>{})}
   try{screen.orientation.lock('portrait').catch(()=>{})}catch(e){}
 }
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){setTimeout(lockOrientation,300)}});
-document.addEventListener('fullscreenchange',()=>{if(document.fullscreenElement)lockOrientation()});
+screen.orientation.addEventListener('change',()=>{lockOrientation()});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&screen.orientation.type!=='portrait-primary'){lockOrientation()}});
 // Register service worker
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js')}
 </script>
