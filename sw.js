@@ -1,12 +1,18 @@
-const CACHE='bookkeeping-v4';
-const URLS=['./','./app.html','./manifest.json','./icon.svg'];
+const CACHE='bookkeeping-v5';
 
 self.addEventListener('install',e=>{
-  e.waitUntil(caches.open(CACHE).then(c=>c.addAll(URLS)).then(()=>self.skipWaiting()));
+  // Clear everything immediately on install
+  e.waitUntil(
+    caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k))))
+    .then(()=>self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate',e=>{
-  e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>clients.claim()));
+  e.waitUntil(
+    caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k))))
+    .then(()=>clients.claim())
+  );
 });
 
 self.addEventListener('fetch',e=>{
