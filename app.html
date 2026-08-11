@@ -659,6 +659,9 @@ function openPicker(type,sub){pT=type;pS=sub||'';let ops=type==='account'?ga():c
   if(type==='category'){
     ops=ops.filter(o=>!gc('hidden_'+ct).includes(o));
     ops=ops.concat(gc(ct));
+    // Auto-include recurring budget categories not in base list (e.g. 生活费)
+    const extra=Object.entries(gb()).filter(([c,cfg])=>cfg.recurring&&!ops.includes(c)).map(([c])=>c);
+    ops=ops.concat(extra);
   }
   const cur=sub==='from'?document.getElementById('txFromBtn').textContent:sub==='to'?document.getElementById('txToBtn').textContent:type==='account'?document.getElementById('txAcctBtn').textContent:document.getElementById('txCatBtn').textContent;
   document.getElementById('pickerTitle').textContent=type==='account'?'选择账户':'选择分类';
