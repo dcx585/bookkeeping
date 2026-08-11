@@ -463,7 +463,11 @@ const DA=['微信','银行卡','应急金','花呗'];
 const CATS=['餐饮','购物','医疗','交通','固定支出','其他'];
 const INC_CATS=['工资/月薪','工资/奖金','理财/基金收益','理财/股息','理财/利息','报销/工作报销','红包/转账','兼职/外快','退款','其他'];
 const CC={'餐饮':'#c0392b','购物':'#b8943e','交通':'#5b9eb5','固定支出':'#8b7aaa','医疗':'#d4735a','工资':'#3c7a44','理财':'#b8860b','报销':'#5b9eb5','红包':'#e67e22','兼职':'#8e44ad','退款':'#7f8c8d','其他':'#8899a6'};
-function cc(c){return CC[(c||'其他').split('/')[0]]||'#8899a6'}
+function cc(c){return CC[(c||'其他').split('/')[0]]||'#'+Math.floor(Math.abs(hash(c))*16777215).toString(16)}
+function hash(s){let h=0;for(let i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0}return h}
+const CK='minis_cat_v1';
+function gc(type){return JSON.parse(localStorage.getItem(CK+'_'+type)||'[]')}
+function sc(type,d){localStorage.setItem(CK+'_'+type,JSON.stringify(d))}
 let cid=Date.now();function uid(){cid++;return cid.toString(36)+Math.random().toString(36).slice(2,6)}
 function atx(){return JSON.parse(localStorage.getItem(SK)||'[]')}
 function stx(d){localStorage.setItem(SK,JSON.stringify(d))}
@@ -650,7 +654,18 @@ function st2(type,btn){ct=type;document.querySelectorAll('.type-btn').forEach(b=
 
 // ── Picker ──
 let pT='',pS='';
-function openPicker(type,sub){pT=type;pS=sub||'';const ops=type==='account'?ga():ct==='income'?INC_CATS:CATS;const cur=sub==='from'?document.getElementById('txFromBtn').textContent:sub==='to'?document.getElementById('txToBtn').textContent:type==='account'?document.getElementById('txAcctBtn').textContent:document.getElementById('txCatBtn').textContent;document.getElementById('pickerTitle').textContent=type==='account'?'选择账户':'选择分类';document.getElementById('pickerList').innerHTML=ops.map(o=>`<div class="picker-row" onclick="sp('${o.replace(/'/g,"\\'")}')">${type==='category'?'<div class="pick-dot" style="background:'+cc(o)+'"></div>':''}<span>${o}</span>${o===cur?'<span class="pick-check">✓</span>':''}</div>`).join('');document.getElementById('pickerModal').classList.add('show')}
+function openPicker(type,sub){pT=type;pS=sub||'';let ops=type==='account'?ga():ct==='income'?INC_CATS:CATS;
+  if(type==='category'){ops=ops.concat(gc(ct))}
+  const cur=sub==='from'?document.getElementById('txFromBtn').textContent:sub==='to'?document.getElementById('txToBtn').textContent:type==='account'?document.getElementById('txAcctBtn').textContent:document.getElementById('txCatBtn').textContent;
+  document.getElementById('pickerTitle').textContent=type==='account'?'选择账户':'选择分类';
+  let h=ops.map(o=>`<div class="picker-row" onclick="sp('${o.replace(/'/g,"\\'")}')">${type==='category'?'<div class="pick-dot" style="background:'+cc(o)+'"></div>':''}<span>${o}</span>${o===cur?'<span class="pick-check">✓</span>':''}</div>`).join('');
+  if(type==='category')h+=`<div class="picker-row" onclick="addCustomCat()" style="color:var(--accent);font-weight:500"><span>+ 自定义</span></div>`;
+  document.getElementById('pickerList').innerHTML=h;document.getElementById('pickerModal').classList.add('show')}
+function addCustomCat(){
+  const n=prompt('自定义分类名称：');if(!n||!n.trim())return;
+  const name=n.trim(),list=gc(ct);if(!list.includes(name)){list.push(name);sc(ct,list)}
+  sp(name);
+}
 function sp(v){if(pT==='account'){if(pS==='from')document.getElementById('txFromBtn').textContent=v;else if(pS==='to')document.getElementById('txToBtn').textContent=v;else{document.getElementById('txAcctBtn').textContent=v;document.getElementById('txAcctBtn').classList.add('selected')}}else{document.getElementById('txCatBtn').textContent=v;document.getElementById('txCatBtn').classList.add('selected')}closePicker()}
 function closePicker(){document.getElementById('pickerModal').classList.remove('show')}
 
