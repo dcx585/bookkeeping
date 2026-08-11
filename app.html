@@ -460,7 +460,7 @@ window.__APP_VER__='v6';
 const SK='minis_bookkeeping_v5',BK='minis_budget_v3',AK='minis_accounts_v2',BGK='minis_bg_v1',IK='minis_invest_v1';
 let cm=new Date().toISOString().slice(0,7),ct='expense',cv='tx',eid=null,sq='';
 const DA=['微信','银行卡','应急金','花呗'];
-const CATS=['餐饮/早午晚餐','餐饮/水果零食','餐饮/饮料','购物/日用品','购物/化妆护肤','医疗/挂号门诊','医疗/药品','交通/打车','交通/公共交通','固定支出/话费','固定支出/家里生活费','其他'];
+const CATS=['餐饮','购物','医疗','交通','固定支出','其他'];
 const INC_CATS=['工资/月薪','工资/奖金','理财/基金收益','理财/股息','理财/利息','报销/工作报销','红包/转账','兼职/外快','退款','其他'];
 const CC={'餐饮':'#c0392b','购物':'#b8943e','交通':'#5b9eb5','固定支出':'#8b7aaa','医疗':'#d4735a','工资':'#3c7a44','理财':'#b8860b','报销':'#5b9eb5','红包':'#e67e22','兼职':'#8e44ad','退款':'#7f8c8d','其他':'#8899a6'};
 function cc(c){return CC[(c||'其他').split('/')[0]]||'#8899a6'}
