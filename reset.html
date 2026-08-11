@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>重置缓存</title></head>
+<body style="font-family:sans-serif;text-align:center;padding:40px 20px">
+<h2>正在清理缓存...</h2>
+<p id="msg">请稍候</p>
+<script>
+(async function(){
+  const msg=document.getElementById('msg');
+  try{
+    // Unregister all service workers
+    const regs=await navigator.serviceWorker.getRegistrations();
+    msg.textContent='找到 '+regs.length+' 个 Service Worker';
+    for(const r of regs){
+      await r.unregister();
+    }
+    // Clear all caches
+    const keys=await caches.keys();
+    msg.textContent+='\n找到 '+keys.length+' 个缓存';
+    for(const k of keys){
+      await caches.delete(k);
+    }
+    msg.textContent='清理完成！即将跳转...';
+    setTimeout(()=>{location.href='./app.html'},1500);
+  }catch(e){
+    msg.textContent='错误: '+e.message;
+  }
+})();
+</script>
+</body></html>
