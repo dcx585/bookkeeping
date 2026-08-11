@@ -136,14 +136,20 @@ jobs:
           cat > app/src/main/java/com/minis/bookkeeping/MainActivity.java << 'JAVA'
           package com.minis.bookkeeping;
           import android.app.Activity;
+          import android.content.Intent;
+          import android.net.Uri;
           import android.os.Bundle;
           import android.view.WindowManager;
+          import android.webkit.ValueCallback;
+          import android.webkit.WebChromeClient;
           import android.webkit.WebSettings;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
 
           public class MainActivity extends Activity {
               private WebView webView;
+              private ValueCallback<Uri[]> filePathCallback;
+              private static final int FILE_CHOOSER = 10001;
 
               @Override
               protected void onCreate(Bundle savedInstanceState) {
@@ -160,21 +166,43 @@ jobs:
                   s.setUseWideViewPort(true);
                   s.setLoadWithOverviewMode(true);
                   webView.setWebViewClient(new WebViewClient());
+                  webView.setWebChromeClient(new WebChromeClient() {
+                      @Override
+                      public boolean onShowFileChooser(WebView wv, ValueCallback<Uri[]> cb, FileChooserParams params) {
+                          if (filePathCallback != null) filePathCallback.onReceiveValue(null);
+                          filePathCallback = cb;
+                          Intent i = params.createIntent();
+                          try { startActivityForResult(i, FILE_CHOOSER); return true; }
+                          catch (Exception e) { filePathCallback = null; return false; }
+                      }
+                  });
                   webView.loadUrl("file:///android_asset/app.html");
               }
 
               @Override
-              public void onBackPressed() {
-                  if (webView.canGoBack()) {
-                      webView.goBack();
-                  } else {
-                      super.onBackPressed();
+              protected void onActivityResult(int req, int res, Intent data) {
+                  super.onActivityResult(req, res, data);
+                  if (req == FILE_CHOOSER) {
+                      Uri[] results = null;
+                      if (res == RESULT_OK && data != null) {
+                          Uri uri = data.getData();
+                          if (uri != null) results = new Uri[]{uri};
+                      }
+                      if (filePathCallback != null) {
+                          filePathCallback.onReceiveValue(results);
+                          filePathCallback = null;
+                      }
                   }
               }
 
               @Override
-              protected void onPause() { super.onPause(); webView.onPause(); }
+              public void onBackPressed() {
+                  if (webView.canGoBack()) webView.goBack();
+                  else super.onBackPressed();
+              }
 
+              @Override
+              protected void onPause() { super.onPause(); webView.onPause(); }
               @Override
               protected void onResume() { super.onResume(); webView.onResume(); }
 
