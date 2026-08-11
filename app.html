@@ -674,8 +674,14 @@ function openPicker(type,sub){pT=type;pS=sub||'';let ops=type==='account'?ga():c
   }
   document.getElementById('pickerList').innerHTML=h;document.getElementById('pickerModal').classList.add('show')}
 function toggleCatRecurring(cat){
-  const b=gb();b[cat]=b[cat]||{budget:0,recurring:false};b[cat].recurring=!b[cat].recurring;sb(b);
-  ra();openPicker(pT,pS); // refresh picker
+  const b=gb();b[cat]=b[cat]||{budget:0,recurring:false};
+  if(!b[cat].recurring){
+    const a=parseFloat(prompt('固定金额（如话费 110）：',b[cat].budget||''));
+    if(!a||a<=0)return ts('请输入有效金额');
+    b[cat].budget=a;
+  }
+  b[cat].recurring=!b[cat].recurring;sb(b);
+  ra();openPicker(pT,pS);
 }
 function deleteCatItem(cat){
   if(!confirm('隐藏 "'+cat+'" 分类？\n（之后可在列表底部恢复）'))return;
