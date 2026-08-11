@@ -234,7 +234,16 @@ body{
 </style>
 </head>
 <body>
-
+<script>
+// Self-healing: old cached version nukes itself
+(function(){
+  if(window.__APP_VER__!=='v6'){
+    if(navigator.serviceWorker){navigator.serviceWorker.getRegistrations().then(function(r){r.forEach(function(x){x.unregister()})})}
+    if(caches){caches.keys().then(function(k){k.forEach(function(x){caches.delete(x)})})}
+    location.replace(location.href);
+  }
+})();
+</script>
 <div class="splash" id="splash"><div class="splash-text" id="splashText">hi，中午好</div></div>
 <div class="bg-layer"></div>
 <div class="bg-overlay"></div>
@@ -435,6 +444,7 @@ body{
 <div class="toast" id="toast"></div>
 
 <script>
+window.__APP_VER__='v6';
 // ── Splash ──
 (function(){
   const h=new Date().getHours();let g;
