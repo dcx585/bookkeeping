@@ -578,7 +578,7 @@ function rss(){
 function quickAddRecurring(cat,amt){
   openTxModal();
   document.getElementById('txAmount').value=amt;
-  document.getElementById('txNote').value=cat;
+  document.getElementById('txNote').value='固定·'+cat;
   document.getElementById('txCatBtn').textContent=cat;
   document.getElementById('txCatBtn').classList.add('selected');
   document.getElementById('txSubmit').textContent='确认支出';
