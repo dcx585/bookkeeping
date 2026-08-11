@@ -690,7 +690,9 @@ function addCustomCat(){
   const name=n.trim(),list=gc(ct);if(!list.includes(name)){list.push(name);sc(ct,list)}
   sp(name);
 }
-function sp(v){if(pT==='account'){if(pS==='from')document.getElementById('txFromBtn').textContent=v;else if(pS==='to')document.getElementById('txToBtn').textContent=v;else{document.getElementById('txAcctBtn').textContent=v;document.getElementById('txAcctBtn').classList.add('selected')}}else{document.getElementById('txCatBtn').textContent=v;document.getElementById('txCatBtn').classList.add('selected')}closePicker()}
+function sp(v){if(pT==='account'){if(pS==='from')document.getElementById('txFromBtn').textContent=v;else if(pS==='to')document.getElementById('txToBtn').textContent=v;else{document.getElementById('txAcctBtn').textContent=v;document.getElementById('txAcctBtn').classList.add('selected')}}else{document.getElementById('txCatBtn').textContent=v;document.getElementById('txCatBtn').classList.add('selected');
+  const b=gb();if(b[v]&&b[v].recurring&&b[v].budget){document.getElementById('txAmount').value=b[v].budget;document.getElementById('txNote').value='固定·'+v}}
+  closePicker()
 function closePicker(){document.getElementById('pickerModal').classList.remove('show')}
 
 // ── Budget settings ──
