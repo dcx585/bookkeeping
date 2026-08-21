@@ -966,6 +966,18 @@ function importCSV(){
     r.onload=function(){
       try{
         let raw=r.result;if(raw.charCodeAt(0)===0xFEFF)raw=raw.slice(1);
+        // 容错：若导入的是JSON备份（以{开头），自动切换为恢复备份逻辑
+        if(raw.trim().charAt(0)==='{'){
+          const d=JSON.parse(raw);
+          if(d.tx){const cur=atx(),ids=new Set(cur.map(t=>t.id));let add=0;d.tx.forEach(t=>{if(!ids.has(t.id)){cur.push(t);ids.add(t.id);add++}});stx(cur)}
+          if(d.budget)sb(d.budget);
+          if(d.accts)sa(d.accts);
+          if(d.inv)si(d.inv);
+          if(d.cats&&d.cats.expense)sc('expense',d.cats.expense);
+          if(d.cats&&d.cats.income)sc('income',d.cats.income);
+          if(d.bg&&d.bg.img){saveBg(d.bg.img,d.bg.fit||'cover',d.bg.color||'',d.bg.overlay??20)}
+          ra();location.reload();return;
+        }
         // 拆分区块：交易主体 + 账户元数据（若有）
         let body=raw, cashAcc=null, invAcc=null;
         const cmark=raw.indexOf('#CASH_ACCOUNTS#');
@@ -999,7 +1011,11 @@ function importCSV(){
         }
         if(invAcc&&invAcc.length){
           let cur=gi();
-          invAcc.forEach(a=>{if(!cur.find(x=>x.name===a.name))cur.push(a)});
+          invAcc.forEach(a=>{
+            const x=cur.find(y=>y.name===a.name);
+            if(x){x.amount=a.amount||x.amount;x.month=a.month||x.month;x.ours=a.ours===false?false:x.ours}
+            else cur.push(a);
+          });
           si(cur);
         }
         ra();
