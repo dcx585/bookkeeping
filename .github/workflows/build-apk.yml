@@ -11,6 +11,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -500,3 +502,24 @@ jobs:
           name: bookkeeping-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
+
+      - name: Publish APK to Release (latest)
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Bookkeeping APK（最新版）
+          body: |
+            ## Bookkeeping 记账 APK
+
+            最新构建自动发布。包含以下功能：
+            - 支出/收入/转账记账 + 月度统计 + 分类占比
+            - 自定义账户管理（现金+理财，可删除）
+            - CSV 导入导出（含账户结构同步）
+            - 从系统通知导入支付（需授权通知使用权）
+            - 剪贴板导入
+            - 自定义图标
+
+            安装：下载 APK 后允许「安装未知应用」即可。
+          files: app/build/outputs/apk/debug/app-debug.apk
+          overwrite: true
