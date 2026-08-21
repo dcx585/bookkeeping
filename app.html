@@ -240,6 +240,17 @@ body{
 .confirm-box .c-btn:active{transform:scale(.97)}
 .confirm-box .c-cancel{background:var(--bg);color:var(--text2)}
 .confirm-box .c-ok{background:var(--red);color:#fff}
+/* 自绘输入弹窗 */
+.prompt-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:410;align-items:center;justify-content:center;padding:32px;backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}
+.prompt-modal.show{display:flex}
+.prompt-box{background:var(--surface);width:100%;max-width:340px;border-radius:16px;padding:22px 20px 16px;box-shadow:0 16px 48px rgba(0,0,0,.2);animation:popIn .22s cubic-bezier(.16,1,.3,1)}
+.prompt-box .p-title{font-size:15px;font-weight:600;color:var(--text);margin-bottom:14px}
+.prompt-box .p-input{width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;font-size:15px;background:var(--bg);color:var(--text);margin-bottom:16px;font-family:inherit;box-sizing:border-box}
+.prompt-box .p-actions{display:flex;gap:10px}
+.prompt-box .p-btn{flex:1;padding:12px;border-radius:10px;border:none;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s}
+.prompt-box .p-btn:active{transform:scale(.97)}
+.prompt-box .p-cancel{background:var(--bg);color:var(--text2)}
+.prompt-box .p-ok{background:var(--gold);color:#fff}
 .search-bar{display:flex;align-items:center;gap:8px;margin:0 16px 8px;position:relative;z-index:2}
 .search-bar input{flex:1;padding:10px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;background:var(--surface);color:var(--text);outline:none;font-family:inherit}
 .search-bar input:focus{border-color:var(--accent)}
@@ -452,6 +463,16 @@ body{
     <div class="c-actions">
       <button class="c-btn c-cancel" id="confirmCancel">取消</button>
       <button class="c-btn c-ok" id="confirmOk">确定</button>
+    </div>
+  </div>
+</div>
+<div class="prompt-modal" id="promptModal">
+  <div class="prompt-box">
+    <div class="p-title" id="promptTitle"></div>
+    <input class="p-input" id="promptInput" type="text">
+    <div class="p-actions">
+      <button class="p-btn p-cancel" id="promptCancel">取消</button>
+      <button class="p-btn p-ok" id="promptOk">确定</button>
     </div>
   </div>
 </div>
@@ -692,11 +713,12 @@ function openPicker(type,sub){pT=type;pS=sub||'';let ops=type==='account'?ga():c
     h+=`<div class="picker-row" onclick="addCustomCat()" style="color:var(--accent);font-weight:500"><span>+ 自定义</span></div>`;
   }
   document.getElementById('pickerList').innerHTML=h;document.getElementById('pickerModal').classList.add('show')}
-function toggleCatRecurring(cat){
+async function toggleCatRecurring(cat){
   const b=gb();b[cat]=b[cat]||{budget:0,recurring:false};
   if(!b[cat].recurring){
-    const a=parseFloat(prompt('固定金额（如话费 110）：',b[cat].budget||''));
-    if(!a||a<=0)return ts('请输入有效金额');
+    const r=await promptBox('固定金额（如话费 110）','金额',b[cat].budget||'');
+    const a=parseFloat(r);
+    if(!r||isNaN(a)||a<=0)return ts('请输入有效金额');
     b[cat].budget=a;
     b[cat].recurring=true;
   }else{
@@ -711,8 +733,9 @@ async function deleteCatItem(cat){
   openPicker(pT,pS);
 }
 function resetHiddenCats(){sc('hidden_'+ct,[]);openPicker(pT,pS)}
-function addCustomCat(){
-  const n=prompt('自定义分类名称：');if(!n||!n.trim())return;
+async function addCustomCat(){
+  const n=await promptBox('自定义分类名称','名称');
+  if(!n||!n.trim())return;
   const name=n.trim(),list=gc(ct);if(!list.includes(name)){list.push(name);sc(ct,list)}
   sp(name);
 }
@@ -740,8 +763,8 @@ function openBudgetSettings(){
   document.getElementById('budgetSettingsModal').classList.add('show');
 }
 async function addCustomBudget(){
-  const n=prompt('预算名称（如：教育、娱乐）：');if(!n||!n.trim())return;
-  const a=parseFloat(prompt('预算金额：'));if(isNaN(a)||a<=0)return ts('请输入有效金额');
+  const n=await promptBox('预算名称（如：教育、娱乐）','名称');if(!n||!n.trim())return;
+  const a=parseFloat(await promptBox('预算金额','金额'));if(isNaN(a)||a<=0)return ts('请输入有效金额');
   const b=gb();const name=n.trim();
   if(b[name]){if(!await confirmBox('"'+name+'" 已存在，覆盖？'))return}
   b[name]={budget:a,recurring:false};sb(b);
@@ -1035,6 +1058,22 @@ function confirmBox(msg){
     ok.onclick=()=>done(true);
     cancel.onclick=()=>done(false);
     modal.onclick=function(e){if(e.target===modal)done(false)};
+  });
+}
+// 自绘输入弹窗：返回Promise<string|null>（null=取消）
+function promptBox(title,placeholder,defaultValue){
+  return new Promise(res=>{
+    const modal=document.getElementById('promptModal');
+    document.getElementById('promptTitle').textContent=title;
+    const input=document.getElementById('promptInput');
+    input.value=defaultValue||'';input.placeholder=placeholder||'';
+    modal.classList.add('show');
+    const ok=document.getElementById('promptOk'),cancel=document.getElementById('promptCancel');
+    function done(v){modal.classList.remove('show');ok.onclick=cancel.onclick=null;res(v)}
+    ok.onclick=()=>done(input.value);
+    cancel.onclick=()=>done(null);
+    modal.onclick=function(e){if(e.target===modal)done(null)};
+    setTimeout(()=>input.focus(),80);
   });
 }
 
