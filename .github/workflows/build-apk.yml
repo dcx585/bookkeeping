@@ -42,46 +42,6 @@ jobs:
           mkdir -p app/src/main/assets
           cp app.html app/src/main/assets/app.html
 
-      - name: Generate launcher icons
-        run: |
-          cd app/src/main/res
-          # 墨绿背景色
-          cat > values/colors.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <color name="ic_launcher_background">#2B513C</color>
-          </resources>
-          EOF
-          # 各密度全幅兜底图标（墨绿底+账本）
-          mkdir -p mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi
-          convert ${GITHUB_WORKSPACE}/icon_src/ic_launcher.png -resize 48x48   mipmap-mdpi/ic_launcher.png
-          convert ${GITHUB_WORKSPACE}/icon_src/ic_launcher.png -resize 72x72   mipmap-hdpi/ic_launcher.png
-          convert ${GITHUB_WORKSPACE}/icon_src/ic_launcher.png -resize 96x96   mipmap-xhdpi/ic_launcher.png
-          convert ${GITHUB_WORKSPACE}/icon_src/ic_launcher.png -resize 144x144 mipmap-xxhdpi/ic_launcher.png
-          convert ${GITHUB_WORKSPACE}/icon_src/ic_launcher.png -resize 192x192 mipmap-xxxhdpi/ic_launcher.png
-          cp mipmap-mdpi/ic_launcher.png mipmap-mdpi/ic_launcher_round.png
-          cp mipmap-hdpi/ic_launcher.png mipmap-hdpi/ic_launcher_round.png
-          cp mipmap-xhdpi/ic_launcher.png mipmap-xhdpi/ic_launcher_round.png
-          cp mipmap-xxhdpi/ic_launcher.png mipmap-xxhdpi/ic_launcher_round.png
-          cp mipmap-xxxhdpi/ic_launcher.png mipmap-xxxhdpi/ic_launcher_round.png
-          # adaptive foreground（108x108画布，符号居中）
-          convert ${GITHUB_WORKSPACE}/icon_src/ic_foreground.png -resize 108x108 drawable/ic_launcher_foreground.png
-          # adaptive icon XML
-          cat > mipmap-anydpi-v26/ic_launcher.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@color/ic_launcher_background" />
-              <foreground android:drawable="@drawable/ic_launcher_foreground" />
-          </adaptive-icon>
-          EOF
-          cat > mipmap-anydpi-v26/ic_launcher_round.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@color/ic_launcher_background" />
-              <foreground android:drawable="@drawable/ic_launcher_foreground" />
-          </adaptive-icon>
-          EOF
-
       - name: Create settings.gradle
         run: |
           cat > settings.gradle << 'EOF'
