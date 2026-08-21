@@ -229,6 +229,17 @@ body{
 
 .toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:300;background:var(--accent);color:#fff;padding:10px 20px;border-radius:20px;font-size:13px;pointer-events:none;opacity:0;transition:opacity .3s}
 .toast.show{opacity:1}
+/* 自绘确认弹窗 */
+.confirm-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:400;align-items:center;justify-content:center;padding:32px;backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}
+.confirm-modal.show{display:flex}
+.confirm-box{background:var(--surface);width:100%;max-width:340px;border-radius:16px;padding:22px 20px 16px;box-shadow:0 16px 48px rgba(0,0,0,.2);animation:popIn .22s cubic-bezier(.16,1,.3,1)}
+@keyframes popIn{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
+.confirm-box .c-msg{font-size:15px;line-height:1.6;color:var(--text);text-align:center;margin-bottom:20px;white-space:pre-line}
+.confirm-box .c-actions{display:flex;gap:10px}
+.confirm-box .c-btn{flex:1;padding:12px;border-radius:10px;border:none;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s}
+.confirm-box .c-btn:active{transform:scale(.97)}
+.confirm-box .c-cancel{background:var(--bg);color:var(--text2)}
+.confirm-box .c-ok{background:var(--red);color:#fff}
 .search-bar{display:flex;align-items:center;gap:8px;margin:0 16px 8px;position:relative;z-index:2}
 .search-bar input{flex:1;padding:10px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;background:var(--surface);color:var(--text);outline:none;font-family:inherit}
 .search-bar input:focus{border-color:var(--accent)}
@@ -435,6 +446,15 @@ body{
 
 <div class="toast" id="toast"></div>
 
+<div class="confirm-modal" id="confirmModal">
+  <div class="confirm-box">
+    <div class="c-msg" id="confirmMsg"></div>
+    <div class="c-actions">
+      <button class="c-btn c-cancel" id="confirmCancel">取消</button>
+      <button class="c-btn c-ok" id="confirmOk">确定</button>
+    </div>
+  </div>
+</div>
 <script>
 // ── Splash ──
 (function(){
@@ -487,8 +507,8 @@ function saveInvEdit(){
   if(a){a.amount=v;a.month=new Date().toISOString().slice(0,7)}else d.push({name:invEditName,amount:v,month:new Date().toISOString().slice(0,7)});
   si(d);closeInvEdit();rac();ts(invEditName+' 已更新');
 }
-function deleteInv(name){
-  if(!confirm('删除理财账户 "'+name+'"？\n（该账户的历史金额将不再计入总资产）'))return;
+async function deleteInv(name){
+  if(!await confirmBox('删除理财账户 "'+name+'"？\n（该账户的历史金额将不再计入总资产）'))return;
   si(gi().filter(a=>a.name!==name));
   rac();ts('已删除 '+name);
 }
@@ -684,8 +704,8 @@ function toggleCatRecurring(cat){
   }
   sb(b);ra();openPicker(pT,pS);
 }
-function deleteCatItem(cat){
-  if(!confirm('隐藏 "'+cat+'" 分类？\n（之后可在列表底部恢复）'))return;
+async function deleteCatItem(cat){
+  if(!await confirmBox('隐藏 "'+cat+'" 分类？\n（之后可在列表底部恢复）'))return;
   const hid=gc('hidden_'+ct);if(!hid.includes(cat)){hid.push(cat);sc('hidden_'+ct,hid)}
   const cust=gc(ct).filter(c=>c!==cat);sc(ct,cust);
   openPicker(pT,pS);
@@ -719,11 +739,11 @@ function openBudgetSettings(){
   document.getElementById('budgetSettingsList').innerHTML=h;
   document.getElementById('budgetSettingsModal').classList.add('show');
 }
-function addCustomBudget(){
+async function addCustomBudget(){
   const n=prompt('预算名称（如：教育、娱乐）：');if(!n||!n.trim())return;
   const a=parseFloat(prompt('预算金额：'));if(isNaN(a)||a<=0)return ts('请输入有效金额');
   const b=gb();const name=n.trim();
-  if(b[name]){if(!confirm('"'+name+'" 已存在，覆盖？'))return}
+  if(b[name]){if(!await confirmBox('"'+name+'" 已存在，覆盖？'))return}
   b[name]={budget:a,recurring:false};sb(b);
   // Append to DOM directly — don't rebuild (would lose unsaved edits)
   const list=document.getElementById('budgetSettingsList');
@@ -737,8 +757,8 @@ function addCustomBudget(){
   list.insertBefore(row,addBtn);
   ts('已添加 '+name);
 }
-function deleteBudgetItem(cat){
-  if(!confirm('删除 "'+cat+'" 预算？'))return;
+async function deleteBudgetItem(cat){
+  if(!await confirmBox('删除 "'+cat+'" 预算？'))return;
   const b=gb();delete b[cat];sb(b);
   // Remove row from DOM instead of rebuilding
   const row=document.querySelector(`#budgetSettingsList input[data-cat="${cat.replace(/"/g,'&quot;')}"]`)?.parentElement;
@@ -768,7 +788,7 @@ function saveNewAcct(){
   a.push(n);sa(a);if(bal!==0){const d=atx();d.push({id:uid(),time:new Date().toISOString(),type:'income',amount:Math.abs(bal),note:'初始余额',account:n,category:''});stx(d)}
   closeAddAcct();ra();ts('已添加 '+n);
 }
-function deleteAcct(n){if(!confirm('删除 "'+n+'"？'))return;sa(ga().filter(a=>a!==n));ra();ts('已删除 '+n)}
+async function deleteAcct(n){if(!await confirmBox('删除 "'+n+'"？'))return;sa(ga().filter(a=>a!==n));ra();ts('已删除 '+n)}
 
 // ── Search ──
 function openSearch(){document.getElementById('searchBar').style.display='flex';document.getElementById('searchInput').focus()}
@@ -993,6 +1013,19 @@ function exportCSVRange(){
   closeExportCSV();ts(`已导出 ${tx.length} 条（含账户结构）`);
 }
 function ts(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('show'),2000)}
+// 自绘确认弹窗：返回Promise<boolean>
+function confirmBox(msg){
+  return new Promise(res=>{
+    const modal=document.getElementById('confirmModal');
+    document.getElementById('confirmMsg').textContent=msg;
+    modal.classList.add('show');
+    const ok=document.getElementById('confirmOk'),cancel=document.getElementById('confirmCancel');
+    function done(v){modal.classList.remove('show');ok.onclick=cancel.onclick=null;res(v)}
+    ok.onclick=()=>done(true);
+    cancel.onclick=()=>done(false);
+    modal.onclick=function(e){if(e.target===modal)done(false)};
+  });
+}
 
 // ── 剪贴板导入 ──
 async function importFromClipboard(){
