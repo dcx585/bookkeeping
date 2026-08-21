@@ -114,11 +114,12 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" />
               <application
                   android:allowBackup="true"
                   android:icon="@mipmap/ic_launcher"
                   android:roundIcon="@mipmap/ic_launcher_round"
-                  android:label="Zhang"
+                  android:label="记账"
                   android:theme="@style/Theme.Bookkeeping"
                   android:hardwareAccelerated="true">
                   <activity
@@ -135,6 +136,7 @@ jobs:
                   <service
                       android:name=".NotificationReaderService"
                       android:exported="false"
+                      android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
                       android:label="读取支付通知">
                       <intent-filter>
                           <action android:name="android.service.notification.NotificationListenerService" />
