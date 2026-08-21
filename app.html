@@ -442,7 +442,7 @@ body{
   if(h>=6&&h<12)g='早上好';else if(h>=12&&h<14)g='中午好';else if(h>=14&&h<18)g='下午好';else if(h>=18&&h<24)g='晚上好';else g='夜深了';
   const t='hi，'+g,el=document.getElementById('splashText');
   el.innerHTML=t.split('').map((c,i)=>`<span class="splash-char" style="animation-delay:${i*80}ms">${c}</span>`).join('');
-  let d=false;function dismiss(){if(d)return;d=true;document.getElementById('splash').classList.add('fadeout');setTimeout(()=>{const s=document.getElementById('splash');if(s)s.remove()},500);if(document.documentElement.requestFullscreen)document.documentElement.requestFullscreen().then(()=>{lockOrientation()}).catch(()=>{})}
+  let d=false;function dismiss(){if(d)return;d=true;document.getElementById('splash').classList.add('fadeout');setTimeout(()=>{const s=document.getElementById('splash');if(s)s.remove()},500);if(!(window.MinisBridge&&typeof window.MinisBridge.setFullscreen==='function')&&document.documentElement.requestFullscreen)document.documentElement.requestFullscreen().then(()=>{lockOrientation()}).catch(()=>{})}
   document.getElementById('splash').addEventListener('click',dismiss);
   setTimeout(dismiss,1500+t.length*80);
 })();
@@ -931,8 +931,14 @@ function ts(m){const e=document.getElementById('toast');e.textContent=m;e.classL
 
 // ── 剪贴板导入 ──
 async function importFromClipboard(){
+  let text='';
   try{
-    const text=await navigator.clipboard.readText();
+    if(window.MinisBridge && typeof window.MinisBridge.readClipboard==='function'){
+      text = window.MinisBridge.readClipboard() || '';
+    }else{
+      text = await navigator.clipboard.readText();
+    }
+    if(!text) return ts('剪贴板为空');
     const items=JSON.parse(text);
     if(!Array.isArray(items)||!items.length)return ts('剪贴板无有效导入数据');
     const cur=atx(),ids=new Set(cur.map(t=>t.id)),today=new Date().toISOString().slice(0,10);
@@ -943,7 +949,7 @@ async function importFromClipboard(){
     });
     if(!added)return ts('没有新数据');
     stx(cur);ra();ts('已导入 '+added+' 条');
-  }catch(e){ts('剪贴板读取失败，请先在 Minis 中说「导入通知」')}
+  }catch(e){ts('剪贴板内容不是有效的导入数据')}
 }
 
 // ── 通知导入 ──
@@ -956,18 +962,73 @@ function openImportNotify(){
   document.getElementById('importNotifyModal').classList.add('show');
 }
 function closeImportNotify(){document.getElementById('importNotifyModal').classList.remove('show')}
+// 从原始支付通知文本解析出记账项（金额/收支/分类/账户）
+function parseNotif(n){
+  const s=(n.title||'')+' '+(n.text||'')+(n.app||'');
+  // 提取金额：支持 ¥15.90、-13.80、支出 15.90 等
+  let amt=null;
+  let m=s.match(/[¥￥]\s?(\d+(?:\.\d{1,2})?)/);
+  if(m){amt=parseFloat(m[1]);}
+  else{
+    m=s.match(/(\d+(?:\.\d{1,2})?)\s?元/);
+    if(m)amt=parseFloat(m[1]);
+    else{m=s.match(/[－-]\s?(\d+(?:\.\d{1,2})?)/); if(m)amt=parseFloat(m[1]);}
+  }
+  if(amt==null) return null;
+  let type='expense';
+  const income=/收入|入账|收款|到账|存入|退回|退款|转入|红包|工资|收益/.test(s);
+  const expense=/支出|消费|付款|支付|已支出|扣款|转入[^收]|消费|转出|缴费|还款/.test(s);
+  const lower=s.toLowerCase();
+  const refund=/退款|退回|退货|取消/.test(s);
+  if(refund) type='income';
+  else if(income && !/支出|消费|付款|转出/.test(s)) type='income';
+  let category='其他';
+  if(/餐饮|吃饭|美团|饿了么|餐厅|外卖|超市|便利店|买菜|零食|奶茶|咖啡/.test(s)) category='餐饮';
+  else if(/淘宝|天猫|京东|拼多多|购物|商城|消费|购买/.test(s)) category='购物';
+  else if(/话费|流量|充值|移动|联通|电信/.test(s)) category='话费';
+  else if(/地铁|公交|打车|滴滴|车票|加油|停车|高速|铁路|航空/.test(s)) category='交通';
+  else if(/还款|信用卡|花呗|借呗|白条/.test(s)) category='还款';
+  else if(/工资|转账|红包|转入|收款|收入/.test(s)) category='其他';
+  let account='';
+  if(/支付宝/.test(s)) account='支付宝';
+  else if(/微信|财付通/.test(s)) account='微信';
+  else if(/银行卡|银行|招商|工商|建设|农业|中国银行/.test(s)) account='银行卡';
+  return {amount:amt, type:type, category:category, account:account, note:s.slice(0,40)};
+}
 async function doImportScan(){
   document.getElementById('importNotifyStatus').textContent='扫描中...';
   document.getElementById('importConfirmBtn').style.display='none';
   impTx=[];
   try{
-    const x=new XMLHttpRequest();
-    x.open('GET','./imported_tx.json',false);
-    x.send();
-    if(x.status!==200)throw new Error('无法读取');
-    impTx=JSON.parse(x.responseText);
+    let raw=null;
+    if(window.MinisBridge && typeof window.MinisBridge.readImportedTx==='function'){
+      // APK 环境：让原生读系统通知并写入文件，再读回
+      if(typeof window.MinisBridge.triggerScan==='function') window.MinisBridge.triggerScan();
+      await new Promise(r=>setTimeout(r,600)); // 给原生一点时间写入
+      raw = window.MinisBridge.readImportedTx();
+    }else{
+      const x=new XMLHttpRequest();
+      x.open('GET','./imported_tx.json',false);
+      x.send();
+      if(x.status!==200)throw new Error('无法读取');
+      raw = x.responseText;
+    }
+    impTx=JSON.parse(raw||'[]');
+    // 原生抓的是原始通知 {app,title,text}，需解析成记账格式
+    if(impTx.length && !impTx[0].amount){
+      impTx = impTx.map(n=>parseNotif(n)).filter(Boolean);
+    }
     if(!impTx.length){
-      document.getElementById('importNotifyStatus').textContent='未发现支付通知。请保留银行/支付通知不要划掉，然后在 Minis 聊天中说「导入通知」触发扫描。';
+      // 通知可能未授权
+      if(window.MinisBridge && typeof window.MinisBridge.hasNotifAccess==='function'){
+        const ok = window.MinisBridge.hasNotifAccess();
+        if(!ok){
+          document.getElementById('importNotifyStatus').textContent='需要先允许读取通知，请在系统设置中开启「通知使用权」。';
+          document.getElementById('importNotifyList').innerHTML='<button class="submit" onclick="if(window.MinisBridge)window.MinisBridge.openNotifSettings()">打开设置授权</button>';
+          return;
+        }
+      }
+      document.getElementById('importNotifyStatus').textContent='未发现支付通知。请保留银行/微信/支付宝支付通知，然后在通知栏确认后重新扫描。';
       return;
     }
     document.getElementById('importNotifyStatus').style.display='none';
@@ -977,7 +1038,7 @@ async function doImportScan(){
     </div>`).join('');
     document.getElementById('importConfirmBtn').style.display='block';
   }catch(e){
-    document.getElementById('importNotifyStatus').textContent='请先在 Minis 聊天中发送「导入通知」，然后再回来打开此页面。';
+    document.getElementById('importNotifyStatus').textContent='扫描失败：'+e.message;
   }
 }
 function doImportConfirm(){
@@ -1008,10 +1069,22 @@ if(window.visualViewport){
 document.querySelectorAll('.modal').forEach(m=>m.addEventListener('click',function(e){if(e.target===this){m.classList.remove('show');eid=null}}));
 ra();
 // Fullscreen toggle
-function toggleFS(){if(!document.fullscreenElement){document.documentElement.requestFullscreen().then(()=>{lockOrientation()}).catch(()=>{ts('不支持全屏')})}else{document.exitFullscreen()}}
+function toggleFS(){
+  if(window.MinisBridge && typeof window.MinisBridge.isFullscreen==='function'){
+    try{
+      const on = !window.MinisBridge.isFullscreen();
+      window.MinisBridge.setFullscreen(on);
+      ts(on?('已进入全屏'):'已退出全屏');
+      return;
+    }catch(e){}
+  }
+  if(!document.fullscreenElement){document.documentElement.requestFullscreen().then(()=>{lockOrientation()}).catch(()=>{ts('不支持全屏')})}else{document.exitFullscreen()}
+}
 // Lock to portrait; re-lock on orientation change (handles screen off/on)
 function lockOrientation(){
-  if(!document.fullscreenElement){document.documentElement.requestFullscreen().catch(()=>{})}
+  // APK 环境下全屏由原生桥控制，不再用 requestFullscreen（会黑屏）
+  const hasBridge = window.MinisBridge && typeof window.MinisBridge.setFullscreen==='function';
+  if(!hasBridge && !document.fullscreenElement){document.documentElement.requestFullscreen().catch(()=>{})}
   try{screen.orientation.lock('portrait').catch(()=>{})}catch(e){}
 }
 screen.orientation.addEventListener('change',()=>{lockOrientation()});
