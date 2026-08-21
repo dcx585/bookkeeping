@@ -487,6 +487,11 @@ function saveInvEdit(){
   if(a){a.amount=v;a.month=new Date().toISOString().slice(0,7)}else d.push({name:invEditName,amount:v,month:new Date().toISOString().slice(0,7)});
   si(d);closeInvEdit();rac();ts(invEditName+' 已更新');
 }
+function deleteInv(name){
+  if(!confirm('删除理财账户 "'+name+'"？\n（该账户的历史金额将不再计入总资产）'))return;
+  si(gi().filter(a=>a.name!==name));
+  rac();ts('已删除 '+name);
+}
 
 // ── Init budgets ──
 // Migrate old subcategory budgets → top-level
@@ -588,7 +593,7 @@ function rac(){
     return `<div class="acct-item">
       <span class="acct-name">${a}</span>
       <span class="acct-val" style="color:${v<0?'var(--red)':'var(--green)'}">¥${v.toFixed(2)}</span>
-      ${DA.includes(a)?'':'<span style="color:var(--text3);margin-left:8px;cursor:pointer;font-size:11px" onclick="event.stopPropagation();deleteAcct(\''+a+'\')">删除</span>'}
+      <span onclick="event.stopPropagation();deleteAcct('${a.replace(/'/g,"\\'")}')" style="color:var(--text3);margin-left:8px;cursor:pointer;font-size:14px;padding:0 4px">×</span>
     </div>`;
   }).join('');
   // Investment accounts
@@ -600,6 +605,7 @@ function rac(){
     return `<div class="acct-item" onclick="openInvEdit('${a.name}')" style="cursor:pointer">
       <span class="acct-name">${a.name}${tag}${m}</span>
       <span class="acct-val" style="color:${a.amount>0?'var(--green)':'var(--text2)'}">¥${(a.amount||0).toLocaleString()}</span>
+      <span onclick="event.stopPropagation();deleteInv('${a.name.replace(/'/g,"\\'")}')" style="color:var(--text3);margin-left:8px;cursor:pointer;font-size:14px;padding:0 4px">×</span>
     </div>`;
   }).join('');
   // Total row
