@@ -201,6 +201,15 @@ body{
 .type-btn.inc.active{color:var(--green)}
 .sheet input{width:100%;padding:14px 16px;border:1px solid var(--border);border-radius:10px;font-size:16px;margin-bottom:10px;outline:none;font-family:inherit;background:var(--bg);color:var(--text);transition:border-color .2s}
 .sheet input:focus{border-color:var(--accent);background:var(--surface)}
+/* 统一原生控件皮肤 */
+select{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2396928b' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;padding-right:34px!important;color:var(--text)}select:focus{outline:none;border-color:var(--accent)!important}
+input[type=date],input[type=time]{appearance:none;-webkit-appearance:none;color-scheme:light}
+input[type=date]::-webkit-calendar-picker-indicator,input[type=time]::-webkit-calendar-picker-indicator{opacity:.5;filter:invert(.3)}
+input[type=color]{appearance:none;-webkit-appearance:none;border:none;padding:0;background:none}
+input[type=range]{appearance:none;-webkit-appearance:none;height:4px;border-radius:2px;background:var(--border);outline:none}
+input[type=range]::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:var(--accent);cursor:pointer;border:none}
+input[type=checkbox]{accent-color:var(--accent)}
+::placeholder{color:var(--text3)}
 .sheet .row{display:flex;gap:10px}
 .sheet .row>*{flex:1}
 .sheet button.submit{width:100%;padding:14px;border-radius:10px;border:none;font-size:16px;font-weight:600;color:#fff;cursor:pointer;margin-top:4px;background:var(--accent);transition:transform .2s}
@@ -300,7 +309,9 @@ body{
 <div class="stats-view" id="acctsView">
   <div class="stats-section"><h3>现金账户</h3><div class="acct-list" id="acctList"></div></div>
   <div style="padding:0"><button class="tab-btn" onclick="openAddAcct()" style="width:auto;padding:10px 24px;font-size:14px;margin-top:8px;color:var(--text);border:1px solid var(--border);background:var(--surface)">+ 添加账户</button></div>
-  <div class="stats-section"><h3>理财账户（手动更新）</h3><div class="acct-list" id="invList"></div></div>
+  <div class="stats-section"><h3>理财账户（手动更新）</h3><div class="acct-list" id="invList"></div>
+    <div style="padding:0"><button class="tab-btn" onclick="openAddInv()" style="width:auto;padding:10px 24px;font-size:14px;margin-top:8px;color:var(--text);border:1px solid var(--border);background:var(--surface)">+ 添加理财账户</button></div>
+  </div>
   <div class="stats-section"><div class="acct-list" id="totalRow" style="border-top:2px solid var(--accent)"></div></div>
 </div>
 
@@ -378,6 +389,22 @@ body{
   </div>
 </div>
 
+<div class="modal" id="autoConfirmModal">
+  <div class="sheet"><h3>自动记账确认</h3>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <span style="font-size:13px;color:var(--text2)" id="autoAcRel">支付通知</span>
+      <span id="autoAcType" style="font-weight:600;color:var(--accent)">支出</span>
+    </div>
+    <input type="number" id="autoAcAmt" placeholder="金额" step="0.01" inputmode="decimal">
+    <select id="autoAcAcct" style="width:100%;padding:14px 16px;border:1px solid var(--border);border-radius:10px;font-size:16px;margin-bottom:10px;font-family:inherit;background:var(--bg);color:var(--text)"></select>
+    <select id="autoAcCat" style="width:100%;padding:14px 16px;border:1px solid var(--border);border-radius:10px;font-size:16px;margin-bottom:10px;font-family:inherit;background:var(--bg);color:var(--text)"></select>
+    <input type="text" id="autoAcNote" placeholder="备注">
+    <div id="autoAcHint" style="font-size:12px;color:var(--text3);margin-bottom:10px;line-height:1.6"></div>
+    <button class="submit" onclick="autoConfirmSave()">✓ 确认入账</button>
+    <button class="cancel-btn" onclick="autoConfirmSkip()">跳过</button>
+  </div>
+</div>
+
 <div class="modal" id="bgModal">
   <div class="sheet"><h3>背景</h3>
     <div id="bgPreview" style="width:100%;height:100px;border-radius:10px;background:var(--bg) center/cover;border:1px solid var(--border);margin-bottom:10px"></div>
@@ -404,6 +431,15 @@ body{
     <input type="text" id="newAcctName" placeholder="账户名称"><input type="number" id="newAcctBalance" placeholder="初始余额（可选）" step="0.01">
     <button class="submit" onclick="saveNewAcct()">添加</button>
     <button class="cancel-btn" onclick="closeAddAcct()">取消</button>
+  </div>
+</div>
+
+<div class="modal" id="addInvModal">
+  <div class="sheet"><h3>添加理财账户</h3>
+    <input type="text" id="newInvName" placeholder="账户名称"><input type="number" id="newInvAmount" placeholder="当前金额（可选）" step="0.01" inputmode="decimal">
+    <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text2);margin-bottom:10px;cursor:pointer"><input type="checkbox" id="newInvOurs" checked style="width:auto">计入总资产</label>
+    <button class="submit" onclick="saveNewInv()">添加</button>
+    <button class="cancel-btn" onclick="closeAddInv()">取消</button>
   </div>
 </div>
 
@@ -532,6 +568,15 @@ async function deleteInv(name){
   if(!await confirmBox('删除理财账户 "'+name+'"？\n（该账户的历史金额将不再计入总资产）'))return;
   si(gi().filter(a=>a.name!==name));
   rac();ts('已删除 '+name);
+}
+function openAddInv(){document.getElementById('newInvName').value='';document.getElementById('newInvAmount').value='';document.getElementById('newInvOurs').checked=true;document.getElementById('addInvModal').classList.add('show')}
+function closeAddInv(){document.getElementById('addInvModal').classList.remove('show')}
+function saveNewInv(){
+  const n=(document.getElementById('newInvName').value||'').trim();if(!n)return ts('请输入账户名称');
+  const d=gi();if(d.find(a=>a.name===n))return ts('账户已存在');
+  const v=parseFloat(document.getElementById('newInvAmount').value);
+  d.push({name:n,amount:isNaN(v)?0:v,month:isNaN(v)?'':new Date().toISOString().slice(0,7),ours:document.getElementById('newInvOurs').checked});
+  si(d);closeAddInv();rac();ts('已添加理财账户 '+n);
 }
 
 // ── Init budgets ──
@@ -1216,6 +1261,157 @@ function doImportConfirm(){
   stx(tx);closeImportNotify();ra();ts('已导入 '+checked.length+' 条');
 }
 
+// ── 自动记账模块 ──
+const AUTO_THRESHOLD = 30;          // ¥30 以下自动入账
+const DEDUP_WINDOW = 5*60*1000;     // 5分钟内同指纹视为同一条（防重叠重复）
+const SPECIAL_SPEND = [/应急金/,/规划金/,/花呗/,/借呗/,/白条/,/理财/,/基金/,/定投/,/学费/,/房租/,/保险费?/,/医疗/,/还款/,/公积金/,/转账/,/工资/,/薪水/,/薪资/,/退款/,/红包/];
+
+function payFingerprint(s, account, amount, time){
+  const m = s.match(/(?:流水号|商户单号|订单号|交易号|单号|付款单号)[:：\s]*([A-Za-z0-9]{6,})/i)
+         || s.match(/([0-9]{10,})/);
+  if(m) return 'ref:'+m[1];
+  const win=Math.floor((time||Date.now())/DEDUP_WINDOW);
+  return 'amt:'+(account||'?')+':'+(amount||0).toFixed(2)+':'+win;
+}
+
+function parseNotifFull(n){
+  const base = parseNotif(n);
+  if(!base) return null;
+  const s=(n.title||'')+' '+(n.text||'')+' '+(n.app||'');
+  const time = n.time||Date.now();
+  const special = SPECIAL_SPEND.find(re=>re.test(s));
+  const finger = payFingerprint(s, base.account, base.amount, time);
+  // 自动入账条件：金额≤阈值 且 非专项资金 且 解析出账户 且 账户是"日常兜底账户"(微信/银行卡)。
+  // 支付宝/花呗等虽能识别，但按你的习惯日常大概率走微信或银行卡 → 归入需确认，避免记错账户。
+  const dailyAccts = ['微信','银行卡'];
+  const isDailyAcct = base.account && dailyAccts.includes(base.account);
+  const needConfirm = !!special || base.amount>AUTO_THRESHOLD || !base.account || !isDailyAcct;
+  return Object.assign({}, base,{
+    src:n.app||'', rawTitle:n.title||'', rawText:n.text||'',
+    time:time, finger:finger, special:special?special.toString():null,
+    needConfirm:needConfirm
+  });
+}
+
+async function readPendingQueue(){
+  let raw='[]';
+  try{
+    if(window.MinisBridge && typeof window.MinisBridge.readPendingTx==='function'){
+      raw = window.MinisBridge.readPendingTx() || '[]';
+    } else if(window.MinisBridge && typeof window.MinisBridge.readImportedTx==='function'){
+      if(typeof window.MinisBridge.triggerScan==='function') window.MinisBridge.triggerScan();
+      await new Promise(r=>setTimeout(r,500));
+      raw = window.MinisBridge.readImportedTx() || '[]';
+    } else {
+      const x=new XMLHttpRequest();
+      x.open('GET','./imported_tx.json',false);x.send();
+      if(x.status===200) raw=x.responseText;
+    }
+  }catch(e){ raw='[]'; }
+  let arr=[]; try{ arr=JSON.parse(raw); }catch(e){ arr=[]; }
+  return Array.isArray(arr)?arr:[];
+}
+function ackPending(ids){
+  if(!ids||!ids.length) return;
+  if(window.MinisBridge && typeof window.MinisBridge.ackPendingTx==='function'){
+    try{ window.MinisBridge.ackPendingTx(JSON.stringify(ids)); }catch(e){}
+  }
+}
+
+function txFingerExists(finger){
+  if(!finger) return false;
+  const cutoff = Date.now()-7*24*3600*1000;
+  return atx().some(t=>{
+    const tms=new Date(t.time).getTime();
+    if(isNaN(tms)||tms<cutoff) return false;
+    if(t.finger&&t.finger===finger) return true;
+    const tf=payFingerprint(t.note||'', t.account, t.amount, tms);
+    return tf===finger;
+  });
+}
+
+function makeTx(e,overrides){
+  return Object.assign({
+    id:uid(), time:new Date(e.time).toISOString(), type:e.type, amount:e.amount,
+    note:e.note||'', account:e.account||'', category:e.category||'其他', finger:e.finger
+  }, overrides||{});
+}
+
+let autoQueue=[], autoIdx=-1, pendingAutoCount=0, autoRunning=false;
+
+async function autoBookkeep(){
+  if(autoRunning) return; autoRunning=true;
+  const q=await readPendingQueue();
+  if(!q.length){ autoRunning=false; return; }
+  const tx=atx();
+  let autoN=0, confirmItems=[], ack=[]; const seen=new Set();
+  for(const n of q){
+    const id=n.id||('q_'+Date.now()+'_'+Math.random().toString(36).slice(2,6));
+    const e=parseNotifFull(n);
+    if(!e){ ack.push(id); continue; }
+    if(seen.has(e.finger)||txFingerExists(e.finger)){ ack.push(id); continue; }
+    seen.add(e.finger);
+    if(!e.needConfirm){
+      tx.push(makeTx(e)); autoN++; ack.push(id);
+    } else {
+      confirmItems.push({id, entry:e});
+    }
+  }
+  stx(tx);
+  if(autoN>0){ ra(); pendingAutoCount+=autoN; }
+  if(confirmItems.length){
+    autoQueue=confirmItems; autoIdx=0;
+    setTimeout(()=>showAutoConfirm(),150);
+  } else if(pendingAutoCount>0){
+    setTimeout(()=>{ts('自动记账 '+pendingAutoCount+' 条（¥'+AUTO_THRESHOLD+' 以内）');pendingAutoCount=0;},400);
+  }
+  ackPending(ack);
+  autoRunning=false;
+}
+
+function openAutoModal(){document.getElementById('autoConfirmModal').classList.add('show')}
+function closeAutoModal(){document.getElementById('autoConfirmModal').classList.remove('show')}
+function showAutoConfirm(){
+  const it=autoQueue[autoIdx];
+  if(!it){ closeAutoModal(); if(pendingAutoCount>0){ts('自动记账完成，剩 '+pendingAutoCount+' 条自动入账');pendingAutoCount=0;} return; }
+  const e=it.entry;
+  document.getElementById('autoAcType').textContent=e.type==='income'?'收入':'支出';
+  document.getElementById('autoAcAmt').value=e.amount.toFixed(2);
+  document.getElementById('autoAcNote').value=e.note||'';
+  const accSel=document.getElementById('autoAcAcct');
+  const accOpts=ga().map(a=>`<option value="${a}" ${a===e.account?'selected':''}>${a}</option>`)
+              .concat(gi().filter(a=>a.ours!==false).map(a=>`<option value="${a.name}">${a.name}</option>`));
+  accSel.innerHTML='<option value="">选择账户…</option>'+accOpts.join('');
+  const cSel=document.getElementById('autoAcCat');
+  cSel.innerHTML='<option value="">选择分类…</option>'+CATS.map(c=>`<option value="${c}" ${c===e.category?'selected':''}>${c}</option>`).join('');
+  document.getElementById('autoAcRel').textContent=(e.src||'支付通知')+(e.special&&e.special!=='/^$/'?' ｜ '+e.special:'');
+  document.getElementById('autoAcHint').textContent = !e.account
+    ? '(建议选 微信 或 银行卡 — 日常小额默认从这两处扣)'
+    : (e.amount>AUTO_THRESHOLD?'金额超过 ¥'+AUTO_THRESHOLD+'，请确认账户':'检测到专项资金，请确认账户');
+  openAutoModal();
+}
+function autoConfirmSkip(){
+  const it=autoQueue[autoIdx];
+  if(it) ackPending([it.id]);
+  autoIdx++;
+  if(autoIdx<autoQueue.length) showAutoConfirm(); else { closeAutoModal(); autoQueue=[]; ts('已跳过待确认项'); }
+}
+function autoConfirmSave(){
+  const it=autoQueue[autoIdx]; if(!it) return;
+  const e=it.entry;
+  const amt=parseFloat(document.getElementById('autoAcAmt').value);
+  const acct=document.getElementById('autoAcAcct').value;
+  const cat=document.getElementById('autoAcCat').value;
+  const note=(document.getElementById('autoAcNote').value||'').trim();
+  if(!(!isNaN(amt)&&amt>0&&acct)) return ts('请填写金额并选择账户');
+  const tx=atx();
+  tx.push(makeTx(e,{amount:amt,account:acct,category:cat||'其他',note:note}));
+  stx(tx);ra();
+  ackPending([it.id]);
+  autoIdx++;
+  if(autoIdx<autoQueue.length) showAutoConfirm(); else { closeAutoModal(); autoQueue=[]; ts('已入账待确认项'); }
+}
+
 // ── Init ──
 // Keyboard-aware sheet positioning
 if(window.visualViewport){
@@ -1232,6 +1428,8 @@ if(window.visualViewport){
 })();
 document.querySelectorAll('.modal').forEach(m=>m.addEventListener('click',function(e){if(e.target===this){m.classList.remove('show');eid=null}}));
 ra();
+// 自动记账：等页面渲染完成后自动处理待入账通知队列
+setTimeout(()=>{ if(window.MinisBridge && (typeof window.MinisBridge.readPendingTx==='function'||typeof window.MinisBridge.readImportedTx==='function')){ autoBookkeep(); } },1200);
 // Fullscreen toggle
 function toggleFS(){
   if(window.MinisBridge && typeof window.MinisBridge.isFullscreen==='function'){

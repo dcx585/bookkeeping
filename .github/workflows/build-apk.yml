@@ -295,6 +295,25 @@ jobs:
                           }
                       } });
                   }
+                  @JavascriptInterface
+                  public String readPendingTx() {
+                      try {
+                          NotificationReaderService svc = new NotificationReaderService();
+                          return svc.read();
+                      } catch (Exception e) { return "[]"; }
+                  }
+                  @JavascriptInterface
+                  public void ackPendingTx(String idsJson) {
+                      final String ids = idsJson == null ? "[]" : idsJson;
+                      mainHandler.post(new Runnable() { public void run() {
+                          try {
+                              org.json.JSONArray arr = new org.json.JSONArray(ids);
+                              String[] list = new String[arr.length()];
+                              for (int i=0;i<arr.length();i++) list[i]=arr.getString(i);
+                              new NotificationReaderService().ack(list);
+                          } catch (Exception ignored) {}
+                      } });
+                  }
               }
               private AppBridge appBridge;
 
@@ -413,69 +432,153 @@ jobs:
           import android.util.Log;
           import java.io.File;
           import java.io.FileOutputStream;
+          import java.io.FileInputStream;
+          import java.io.FileWriter;
+          import java.io.RandomAccessFile;
 
+          /**
+           * 档次1：通知到达即实时入队（追加到 pending_tx.json 消费队列）。
+           * 解析/判重/入账由网页端(JS)统一负责；此处只负责可靠采集 + 消费确认。
+           */
           public class NotificationReaderService extends NotificationListenerService {
               public static final String ACTION_SEND = "com.minis.bookkeeping.SEND_PAYLOAD";
               private static final String TAG = "NotifReader";
+              private static final Object LOCK = new Object();
 
               public static boolean isEnabled(Context ctx) {
                   String flat = Settings.Secure.getString(ctx.getContentResolver(), "enabled_notification_listeners");
                   return flat != null && flat.contains(ctx.getPackageName());
               }
 
+              private File queueFile() { return new File(getFilesDir(), "imported_tx.json"); }
+
               @Override
               public IBinder onBind(Intent intent) { return super.onBind(intent); }
 
               @Override
               public void onNotificationPosted(StatusBarNotification sbn) {
-                  try { dump(); } catch (Exception e) { Log.e(TAG, "dump err", e); }
+                  try { appendNotification(sbn); } catch (Exception e) { Log.e(TAG, "queue err", e); }
               }
               @Override
               public void onNotificationRemoved(StatusBarNotification sbn) {
-                  try { dump(); } catch (Exception e) { Log.e(TAG, "dump err", e); }
+                  // 移除时也补抓一次，避免重复清理导致丢失（JS 端会按 id 判重）
+                  try { appendNotification(sbn); } catch (Exception e) { Log.e(TAG, "rm err", e); }
               }
               @Override
               public int onStartCommand(Intent intent, int flags, int startId) {
                   if (intent != null && ACTION_SEND.equals(intent.getAction())) {
-                      try { dump(); } catch (Exception e) { Log.e(TAG, "dump err", e); }
+                      // 手动触发：全量入队一次（用于补漏），JS 判重会过滤
+                      try {
+                          StatusBarNotification[] sns = getActiveNotifications();
+                          for (StatusBarNotification sbn : sns) appendNotification(sbn);
+                      } catch (Exception e) { Log.e(TAG, "full err", e); }
                   }
                   return START_STICKY;
               }
 
-              private void dump() throws Exception {
-                  StatusBarNotification[] sns = getActiveNotifications();
-                  StringBuilder sb = new StringBuilder();
-                  sb.append("[\n");
-                  boolean first = true;
-                  for (StatusBarNotification sbn : sns) {
-                      Notification n = sbn.getNotification();
-                      if (n == null || n.extras == null) continue;
-                      String title = String.valueOf(n.extras.getCharSequence("android.title", ""));
-                      String text = String.valueOf(n.extras.getCharSequence("android.text", ""));
-                      String big = String.valueOf(n.extras.getCharSequence("android.bigText", ""));
-                      if (title.equals("null")) title = "";
-                      if (text.equals("null")) text = "";
-                      if (big.equals("null")) big = "";
-                      String combined = title + " | " + text + " " + big;
-                      if (combined.trim().isEmpty()) continue;
-                      if (!first) sb.append(",\n");
-                      first = false;
-                      sb.append("{\"app\":\"").append(sbn.getPackageName().replace("\"",""))
-                        .append("\",\"title\":\"").append(esc(title))
-                        .append("\",\"text\":\"").append(esc(text + " " + big)).append("\"}");
+              /** 把一条通知追加进队列（带唯一 id，供 JS 判重/确认） */
+              private void appendNotification(StatusBarNotification sbn) throws Exception {
+                  Notification n = sbn.getNotification();
+                  if (n == null || n.extras == null) return;
+                  String title = str(n.extras.getCharSequence("android.title"));
+                  String text = str(n.extras.getCharSequence("android.text"));
+                  String big = str(n.extras.getCharSequence("android.bigText"));
+                  String combined = title + " | " + text + " " + big;
+                  if (combined.trim().isEmpty()) return;
+                  String id = java.util.UUID.randomUUID().toString().substring(0, 8)
+                             + "_" + System.currentTimeMillis();
+                  String entry =
+                        "{\"id\":\"" + id
+                        + "\",\"app\":\"" + esc(sbn.getPackageName())
+                        + "\",\"title\":\"" + esc(title)
+                        + "\",\"text\":\"" + esc(text + " " + big)
+                        + "\",\"time\":" + System.currentTimeMillis() + "}";
+                  synchronized (LOCK) {
+                      File qf = queueFile();
+                      StringBuilder cur = new StringBuilder("");
+                      if (qf.exists()) {
+                         byte[] b = new byte[(int) Math.min(qf.length(), 4*1024*1024)];
+                         FileInputStream fi = new FileInputStream(qf);
+                         int off=0, r; while(off<b.length && (r=fi.read(b,off,b.length-off))>0){off+=r;}
+                         fi.close(); cur.append(new String(b,0,off,"UTF-8"));
+                      }
+                      String pending = cur.toString().trim();
+                      String next;
+                      if (pending.isEmpty() || pending.equals("[]")) {
+                          next = "[" + entry + "]";
+                      } else {
+                          String base = pending;
+                          if (base.endsWith("]")) base = base.substring(0, base.length()-1);
+                          if (base.endsWith(",")) base = base.substring(0, base.length()-1);
+                          next = base + "," + entry + "]";
+                      }
+                      FileOutputStream fo = new FileOutputStream(qf);
+                      fo.write(next.getBytes("UTF-8"));
+                      fo.close();
                   }
-                  sb.append("\n]");
-                  File f = new File(getFilesDir(), "imported_tx.json");
-                  FileOutputStream fo = new FileOutputStream(f);
-                  fo.write(sb.toString().getBytes("UTF-8"));
-                  fo.close();
+              }
+
+              /** 读取队列全文 */
+              public String read() throws Exception {
+                  synchronized (LOCK) {
+                      File qf = queueFile();
+                      if (!qf.exists()) return "[]";
+                      byte[] b = new byte[(int) Math.min(qf.length(), 4*1024*1024)];
+                      FileInputStream fi = new FileInputStream(qf);
+                      int off=0, r; while(off<b.length && (r=fi.read(b,off,b.length-off))>0){off+=r;}
+                      fi.close();
+                      return new String(b,0,off,"UTF-8");
+                  }
+              }
+
+              /** 消费确认：删除指定 id 的条目 */
+              public void ack(String[] ids) throws Exception {
+                  if (ids == null) return;
+                  java.util.Set<String> set = new java.util.HashSet<>();
+                  for (String i : ids) set.add(i);
+                  synchronized (LOCK) {
+                      File qf = queueFile();
+                      if (!qf.exists()) return;
+                      byte[] b = new byte[(int) Math.min(qf.length(), 4*1024*1024)];
+                      FileInputStream fi = new FileInputStream(qf);
+                      int off=0, r; while(off<b.length && (r=fi.read(b,off,b.length-off))>0){off+=r;}
+                      fi.close();
+                      String json = new String(b,0,off,"UTF-8"); // [{...},{"id":"x"},...]
+                      StringBuilder out = new StringBuilder("[");
+                      boolean first=true;
+                      // 简单按 {"id":...} 对象拆分过滤
+                      int i=0; String s=json.trim();
+                      if (s.startsWith("[")) s = s.substring(1);
+                      if (s.endsWith("]")) s = s.substring(0, s.length()-1);
+                      java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\{[^\\{\\}]*\\}").matcher(s);
+                      while (m.find()) {
+                          String obj = m.group();
+                          boolean drop=false;
+                          java.util.regex.Matcher im = java.util.regex.Pattern.compile("\"id\":\"([^\"]+)\"").matcher(obj);
+                          if (im.find() && set.contains(im.group(1))) drop=true;
+                          if (!drop) {
+                              if (!first) out.append(",");
+                              first=false;
+                              out.append(obj);
+                          }
+                      }
+                      out.append("]");
+                      FileOutputStream fo = new FileOutputStream(qf);
+                      fo.write(out.toString().getBytes("UTF-8"));
+                      fo.close();
+                  }
+              }
+
+              private String str(CharSequence cs) {
+                  String v = cs==null ? "" : cs.toString();
+                  if (v.equals("null")) return "";
+                  return v;
               }
               private String esc(String s) {
                   return s.replace("\\","\\\\").replace("\"","\\\"").replace("\n"," ").replace("\r"," ");
               }
           }
           JAVA
-
       - name: Create strings.xml
         run: |
           cat > app/src/main/res/values/strings.xml << 'EOF'
@@ -520,12 +623,15 @@ jobs:
 
             最新构建自动发布。包含以下功能：
             - 支出/收入/转账记账 + 月度统计 + 分类占比
-            - 自定义账户管理（现金+理财，可删除）
+            - 自定义账户管理（现金+理财，均支持新增/删除）
+            - 📥 自动记账：打开自动读取支付通知并入账
+              · ≤¥30 且走微信/银行卡 → 静默自动入账
+              · >¥30、专项资金(规划金/花呗/理财等)、识别不清 → 弹框确认
+              · 智能判重：同交易多条通知不重复入账
             - CSV 导入导出（含账户结构同步）
-            - 从系统通知导入支付（需授权通知使用权）
             - 剪贴板导入
-            - 自定义图标
-
+            - 自定义图标 + 统一皮肤控件
+            - 自动记账专用确认框（可改账户/分类/金额）
             安装：下载 APK 后允许「安装未知应用」即可。
           files: app/build/outputs/apk/debug/app-debug.apk
           overwrite: true
