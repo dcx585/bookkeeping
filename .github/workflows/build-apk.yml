@@ -496,10 +496,15 @@ jobs:
                   String big = str(n.extras.getCharSequence("android.bigText"));
                   String combined = title + " | " + text + " " + big;
                   if (combined.trim().isEmpty()) return;
+                  // 唯一通知标识：同一条通知（同一应用内id名）多次回调/triggerScan反复扫不重复追加
+                  // 用 package+id 区分通知实例；更新时id不变故不重复，不同支付通知id不同则分列
+                  String nkey = sbn.getPackageName() + "|" + sbn.getId();
+                  if (queueHasNkey(nkey)) return;   // 队列里已有未处理的同一条 → 跳过
                   String id = java.util.UUID.randomUUID().toString().substring(0, 8)
                              + "_" + System.currentTimeMillis();
                   String entry =
                         "{\"id\":\"" + id
+                        + "\",\"nkey\":\"" + esc(nkey)
                         + "\",\"app\":\"" + esc(sbn.getPackageName())
                         + "\",\"title\":\"" + esc(title)
                         + "\",\"text\":\"" + esc(text + " " + big)
@@ -526,6 +531,19 @@ jobs:
                       FileOutputStream fo = new FileOutputStream(qf);
                       fo.write(next.getBytes("UTF-8"));
                       fo.close();
+                  }
+              }
+              private boolean queueHasNkey(String nkey) throws Exception {
+                  if (nkey == null) return false;
+                  synchronized (LOCK) {
+                      File qf = queueFile();
+                      if (!qf.exists()) return false;
+                      byte[] b = new byte[(int) Math.min(qf.length(), 4*1024*1024)];
+                      FileInputStream fi = new FileInputStream(qf);
+                      int off=0, r; while(off<b.length && (r=fi.read(b,off,b.length-off))>0){off+=r;}
+                      fi.close();
+                      String s = new String(b,0,off,"UTF-8");
+                      return s.contains("\"nkey\":\"" + nkey.replace("\\","\\\\").replace("\"","\\\"") + "\"");
                   }
               }
 
