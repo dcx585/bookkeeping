@@ -1378,22 +1378,29 @@ function parseNotifMulti(n){
 async function readPendingQueue(){
   let raw='[]';
   try{
-    if(window.MinisBridge && typeof window.MinisBridge.readPendingTx==='function'){
-      // 先让原生把当前活动通知补打进队列(即使实时监听未触发也能拿到)，再读。
-      // 用轮询而不是固定等待，避免竞态漏读刚写入的队列。
+    // 优先用 readImportedTx: 与手动扫描走完全相同的已验证可用路径。
+    // readPendingTx 是新建未绑定 service 实例读文件，存在抛异常风险，仅作兜底。
+    if(window.MinisBridge && typeof window.MinisBridge.readImportedTx==='function'){
       if(typeof window.MinisBridge.triggerScan==='function') window.MinisBridge.triggerScan();
-      for(let tries=0;tries<8;tries++){
+      // 轮询读取，等原生写入完成(冷启动服务可能慢)，最多等3秒
+      let last='[]';
+      for(let tries=0;tries<12;tries++){
         await new Promise(r=>setTimeout(r,250));
-        raw = window.MinisBridge.readPendingTx() || '[]';
-        let arr=[]; try{ arr=JSON.parse(raw); }catch(e){ arr=[]; }
+        try{ last=window.MinisBridge.readImportedTx()||'[]'; }catch(e){ last='[]'; }
+        let arr=[]; try{ arr=JSON.parse(last); }catch(e){ arr=[]; }
         if(Array.isArray(arr)&&arr.length) return arr;
-        if(arr.length===0 && !(window.MinisBridge.readPendingTx()||'[]').includes('[]') && tries>=2) break;
       }
-      raw = window.MinisBridge.readPendingTx() || '[]';
-    } else if(window.MinisBridge && typeof window.MinisBridge.readImportedTx==='function'){
+      raw=last;
+    } else if(window.MinisBridge && typeof window.MinisBridge.readPendingTx==='function'){
       if(typeof window.MinisBridge.triggerScan==='function') window.MinisBridge.triggerScan();
-      await new Promise(r=>setTimeout(r,500));
-      raw = window.MinisBridge.readImportedTx() || '[]';
+      let last='[]';
+      for(let tries=0;tries<12;tries++){
+        await new Promise(r=>setTimeout(r,250));
+        try{ last=window.MinisBridge.readPendingTx()||'[]'; }catch(e){ last='[]'; }
+        let arr=[]; try{ arr=JSON.parse(last); }catch(e){ arr=[]; }
+        if(Array.isArray(arr)&&arr.length) return arr;
+      }
+      raw=last;
     } else {
       const x=new XMLHttpRequest();
       x.open('GET','./imported_tx.json',false);x.send();
@@ -1545,15 +1552,24 @@ if(window.visualViewport){
 })();
 document.querySelectorAll('.modal').forEach(m=>m.addEventListener('click',function(e){if(e.target===this){m.classList.remove('show');eid=null}}));
 ra();
-// 自动记账：等页面渲染完成后自动处理待入账通知队列
-setTimeout(()=>{ if(window.MinisBridge && (typeof window.MinisBridge.readPendingTx==='function'||typeof window.MinisBridge.readImportedTx==='function')){ autoBookkeep(); } },1200);
-// 回到前台(切回App/切回页面)时再触发自动记账，处理期间收到的新通知
-document.addEventListener('visibilitychange',()=>{
-  if(document.visibilityState==='visible' && window.MinisBridge &&
-     (typeof window.MinisBridge.readPendingTx==='function'||typeof window.MinisBridge.readImportedTx==='function')){
-    autoBookkeep();
-  }
-});
+// 自动记账：页面存活期间持续主动轮询 + 多种事件触发，不依赖单一时机点。
+// 这是解决"打开app也不自动"的核心 — 只要页面活着，就定期检查队列并处理。
+(function(){
+  const bridgeOK = ()=> window.MinisBridge && (typeof window.MinisBridge.readPendingTx==='function'||typeof window.MinisBridge.readImportedTx==='function');
+  // 1) 页面加载后立即尝试（等 bridge 就绪，最长重试10次×300ms）
+  (function tryImmediate(){
+    if(bridgeOK()){ autoBookkeep(); }
+    else if(!window.__abInit){ window.__abInit=0; const t=setInterval(()=>{ window.__abInit++; if(bridgeOK()||window.__abInit>10){ clearInterval(t); if(bridgeOK()) autoBookkeep(); } },300); }
+  })();
+  // 2) 页面可见时每 5 秒轮询处理新通知（fingerprint 判重 + autoRunning 锁防重复）
+  let pollTimer=null;
+  function startPoll(){ if(pollTimer) return; pollTimer=setInterval(()=>{ if(document.visibilityState==='visible') autoBookkeep(); },5000); }
+  function stopPoll(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
+  if(document.visibilityState==='visible') startPoll();
+  // 3) visibilitychange / focus 事件：切回前台立即处理
+  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible' && bridgeOK()){ startPoll(); autoBookkeep(); } });
+  window.addEventListener('focus',()=>{ if(bridgeOK()){ autoBookkeep(); } });
+})();
 // Fullscreen toggle
 function toggleFS(){
   if(window.MinisBridge && typeof window.MinisBridge.isFullscreen==='function'){
