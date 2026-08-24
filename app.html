@@ -1223,9 +1223,9 @@ async function doImportScan(){
       raw = x.responseText;
     }
     impTx=JSON.parse(raw||'[]');
-    // 原生抓的是原始通知 {app,title,text}，需解析成记账格式
+    // 原生抓的是原始通知 {app,title,text}，需解析成记账格式(支持一条多笔)
     if(impTx.length && !impTx[0].amount){
-      impTx = impTx.map(n=>parseNotif(n)).filter(Boolean);
+      impTx = impTx.flatMap(n=>parseNotifMulti(n)).filter(Boolean);
     }
     if(!impTx.length){
       // 通知可能未授权
@@ -1275,22 +1275,103 @@ function payFingerprint(s, account, amount, time){
 }
 
 function parseNotifFull(n){
-  const base = parseNotif(n);
-  if(!base) return null;
-  const s=(n.title||'')+' '+(n.text||'')+' '+(n.app||'');
+  // 返回数组：一条通知可能合了多笔支付（安卓把2-3条合并成一条），所以输出多笔
   const time = n.time||Date.now();
-  const special = SPECIAL_SPEND.find(re=>re.test(s));
-  const finger = payFingerprint(s, base.account, base.amount, time);
-  // 自动入账条件：金额≤阈值 且 非专项资金 且 解析出账户 且 账户是"日常兜底账户"(微信/银行卡)。
-  // 支付宝/花呗等虽能识别，但按你的习惯日常大概率走微信或银行卡 → 归入需确认，避免记错账户。
-  const dailyAccts = ['微信','银行卡'];
-  const isDailyAcct = base.account && dailyAccts.includes(base.account);
-  const needConfirm = !!special || base.amount>AUTO_THRESHOLD || !base.account || !isDailyAcct;
-  return Object.assign({}, base,{
-    src:n.app||'', rawTitle:n.title||'', rawText:n.text||'',
-    time:time, finger:finger, special:special?special.toString():null,
-    needConfirm:needConfirm
+  const raw=(n.title||'')+' '+(n.text||'')+' '+(n.app||'');
+  // 多笔解析
+  const items = parseNotifMulti(n);
+  return items.map((b,i)=>{
+    // 专项资金判定针对"每一笔自身"的文本，且只针对支出(收入如退款/工资/红包应正常记账，账户不敏感)
+    const segText=b.note||'';
+    const special = (b.type==='expense') ? SPECIAL_SPEND.find(re=>re.test(segText)) : null;
+    const finger = payFingerprint(b.note||raw, b.account, b.amount, time+i*1000);
+    // 自动入账条件：金额≤阈值 且 非专项资金 且 账户是"日常兜底账户"(微信/银行卡)。
+    const dailyAccts = ['微信','银行卡'];
+    const isDailyAcct = b.account && dailyAccts.includes(b.account);
+    const needConfirm = !!special || b.amount>AUTO_THRESHOLD || !b.account || !isDailyAcct;
+    return Object.assign({}, b,{
+      src:n.app||'', time:time, finger:finger,
+      special:special?special.toString():null, needConfirm:needConfirm
+    });
   });
+}
+
+// ── 多笔解析：一条通知拆出多笔独立交易（针对"多条支付合并成一条通知"）──
+function findAmounts(s){
+  const out=[];
+  const re=/([¥￥]\s?\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?\s?元)|[-－]\s?\d+(?:\.\d{1,2})?|(?:扣款|消费|付款|支付|支出|退款|退回|收入|收款|到账|存入|转入|买入|卖出|花费|花出|缴|充值|还款|应还|优惠后)\s?\d+(?:\.\d{1,2})?/g;
+  let m;
+  while((m=re.exec(s))){
+    const amtMatch=m[0].match(/\d+(?:\.\d{1,2})?/);
+    const amt=amtMatch?parseFloat(amtMatch[0]):null;
+    if(amt==null) continue;
+    out.push({amt, pos:m.index, len:m[0].length});
+  }
+  return out;
+}
+function isPaymentSegment(seg){
+  // 若不含任何支付动作词且无¥/￥符号，视为非支付段落
+  return /消费|付款|支付|支出|扣款|退款|退回|收入|收款|到账|存入|转入|花费|花出|购入|买了|充值|缴费|还款|转账|买入|卖出|实付|优惠/.test(seg)||/[¥￥]/.test(seg);
+}
+function splitByAmount(s){
+  const amounts=findAmounts(s);
+  if(!amounts.length) return [s];
+  const segs=[];
+  for(let i=0;i<amounts.length;i++){
+    const start=amounts[i].pos;
+    const end=i+1<amounts.length?amounts[i+1].pos:s.length;
+    segs.push(s.slice(start,end));
+  }
+  return segs;
+}
+function singleParse(seg,parentAcc){
+  const f=findAmounts(seg);
+  if(!f.length) return null;
+  const amt=f[0].amt;
+  const s=seg;
+  let type='expense';
+  const income=/收入|入账|收款|到账|存入|退回|退款|转入|红包|工资|收益/.test(s);
+  const expense=/支出|消费|付款|支付|已支出|扣款|转出|缴费|还款/.test(s);
+  if(/退款|退回|退货|取消/.test(s)) type='income';
+  else if(income && !/支出|消费|付款|转出/.test(s)) type='income';
+  let category='其他';
+  if(/餐饮|吃饭|美团|饿了么|餐厅|外卖|超市|便利店|买菜|零食|奶茶|咖啡/.test(s)) category='餐饮';
+  else if(/淘宝|天猫|京东|拼多多|购物|商城|消费|购买/.test(s)) category='购物';
+  else if(/话费|流量|充值|移动|联通|电信/.test(s)) category='话费';
+  else if(/地铁|公交|打车|滴滴|车票|加油|停车|高速|铁路|航空/.test(s)) category='交通';
+  else if(/还款|信用卡|花呗|借呗|白条/.test(s)) category='还款';
+  let account='';
+  if(/支付宝/.test(s)) account='支付宝';
+  else if(/微信|财付通/.test(s)) account='微信';
+  else if(/银行卡|银行|招商|工商|建设|农业|中国银行/.test(s)) account='银行卡';
+  if(!account) account=parentAcc||'';
+  if(!isPaymentSegment(s)) return null;
+  return {amount:amt,type:type,category:category,account:account,
+          note:s.replace(/^(微信支付|支付宝|银联|招行|[A-Za-z0-9_]+)?\s*/,'').slice(0,40)};
+}
+function parseNotifMulti(n){
+  const raw=(n.title||'')+' '+(n.text||'')+' '+(n.app||'');
+  let parentAcc='';
+  if(/支付宝/.test(raw)) parentAcc='支付宝';
+  else if(/微信|财付通/.test(raw)) parentAcc='微信';
+  else if(/银行卡|银行|招商|工商|建设|农业|中国银行/.test(raw)) parentAcc='银行卡';
+  const appRe=n.app?new RegExp(n.app.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'g'):null;
+  let parts=raw.split(/[\n\r；;。！]+/).map(p=>p.trim()).filter(Boolean);
+  let segments=[];
+  for(const p of parts){
+    const amts=findAmounts(p);
+    if(amts.length>1) segments=segments.concat(splitByAmount(p));
+    else segments.push(p);
+  }
+  const results=[];
+  for(const seg of segments){
+    let clean=seg;
+    if(appRe) clean=clean.replace(appRe,'');
+    clean=clean.trim();
+    const r=singleParse(clean,parentAcc);
+    if(r) results.push(r);
+  }
+  return results;
 }
 
 async function readPendingQueue(){
@@ -1344,18 +1425,26 @@ async function autoBookkeep(){
   const q=await readPendingQueue();
   if(!q.length){ autoRunning=false; return; }
   const tx=atx();
-  let autoN=0, confirmItems=[], ack=[]; const seen=new Set();
+  let autoN=0, confirmItems=[], autoAck=[];
+  const seen=new Set();
   for(const n of q){
-    const id=n.id||('q_'+Date.now()+'_'+Math.random().toString(36).slice(2,6));
-    const e=parseNotifFull(n);
-    if(!e){ ack.push(id); continue; }
-    if(seen.has(e.finger)||txFingerExists(e.finger)){ ack.push(id); continue; }
-    seen.add(e.finger);
-    if(!e.needConfirm){
-      tx.push(makeTx(e)); autoN++; ack.push(id);
-    } else {
-      confirmItems.push({id, entry:e});
+    const nid=n.id||('q_'+Date.now()+'_'+Math.random().toString(36).slice(2,6));
+    const es=parseNotifFull(n);   // 可能多笔
+    if(!es.length){ autoAck.push(nid); continue; }  // 非支付通知
+    let anyAuto=false, anyConfirm=false;
+    for(const e of es){
+      if(seen.has(e.finger)||txFingerExists(e.finger)){ anyAuto=true; continue; }
+      seen.add(e.finger);
+      if(!e.needConfirm){
+        tx.push(makeTx(e)); autoN++; anyAuto=true;
+      } else {
+        confirmItems.push({pid:nid, entry:e}); anyConfirm=true;
+      }
     }
+    // ack原则：仅当该通知的所有子笔都不需要确认时才立即ack；
+    // 有确认子笔的，等确认完成后由 confirm 函数统一 ack（finishAutoConfirms）
+    if(anyAuto && !anyConfirm) autoAck.push(nid);
+    else if(!anyAuto && !anyConfirm && es.length) autoAck.push(nid);
   }
   stx(tx);
   if(autoN>0){ ra(); pendingAutoCount+=autoN; }
@@ -1365,7 +1454,7 @@ async function autoBookkeep(){
   } else if(pendingAutoCount>0){
     setTimeout(()=>{ts('自动记账 '+pendingAutoCount+' 条（¥'+AUTO_THRESHOLD+' 以内）');pendingAutoCount=0;},400);
   }
-  ackPending(ack);
+  ackPending(autoAck);
   autoRunning=false;
 }
 
@@ -1390,11 +1479,16 @@ function showAutoConfirm(){
     : (e.amount>AUTO_THRESHOLD?'金额超过 ¥'+AUTO_THRESHOLD+'，请确认账户':'检测到专项资金，请确认账户');
   openAutoModal();
 }
+let autoHandledPids=new Set();
+function finishAutoConfirms(){
+  if(autoHandledPids.size){ ackPending([...autoHandledPids]); autoHandledPids=new Set(); }
+}
 function autoConfirmSkip(){
   const it=autoQueue[autoIdx];
-  if(it) ackPending([it.id]);
+  if(it) autoHandledPids.add(it.pid);
   autoIdx++;
-  if(autoIdx<autoQueue.length) showAutoConfirm(); else { closeAutoModal(); autoQueue=[]; ts('已跳过待确认项'); }
+  if(autoIdx<autoQueue.length) showAutoConfirm();
+  else { closeAutoModal(); autoQueue=[]; finishAutoConfirms(); ts('已跳过待确认项'); }
 }
 function autoConfirmSave(){
   const it=autoQueue[autoIdx]; if(!it) return;
@@ -1407,9 +1501,9 @@ function autoConfirmSave(){
   const tx=atx();
   tx.push(makeTx(e,{amount:amt,account:acct,category:cat||'其他',note:note}));
   stx(tx);ra();
-  ackPending([it.id]);
+  autoHandledPids.add(it.pid);
   autoIdx++;
-  if(autoIdx<autoQueue.length) showAutoConfirm(); else { closeAutoModal(); autoQueue=[]; ts('已入账待确认项'); }
+  if(autoIdx<autoQueue.length) showAutoConfirm(); else { closeAutoModal(); autoQueue=[]; finishAutoConfirms(); ts('已入账待确认项'); }
 }
 
 // ── Init ──
