@@ -1327,7 +1327,8 @@ function splitByAmount(s){
 function singleParse(seg,parentAcc){
   const f=findAmounts(seg);
   if(!f.length) return null;
-  const amt=f[0].amt;
+  const amt=isFinite(f[0].amt)&&f[0].amt>0?f[0].amt:null;
+  if(amt==null) return null;
   const s=seg;
   let type='expense';
   const income=/收入|入账|收款|到账|存入|退回|退款|转入|红包|工资|收益/.test(s);
@@ -1378,9 +1379,16 @@ async function readPendingQueue(){
   let raw='[]';
   try{
     if(window.MinisBridge && typeof window.MinisBridge.readPendingTx==='function'){
-      // 先让原生把当前活动通知补打进队列(即使实时监听未触发也能拿到)，再读
+      // 先让原生把当前活动通知补打进队列(即使实时监听未触发也能拿到)，再读。
+      // 用轮询而不是固定等待，避免竞态漏读刚写入的队列。
       if(typeof window.MinisBridge.triggerScan==='function') window.MinisBridge.triggerScan();
-      await new Promise(r=>setTimeout(r,400));
+      for(let tries=0;tries<8;tries++){
+        await new Promise(r=>setTimeout(r,250));
+        raw = window.MinisBridge.readPendingTx() || '[]';
+        let arr=[]; try{ arr=JSON.parse(raw); }catch(e){ arr=[]; }
+        if(Array.isArray(arr)&&arr.length) return arr;
+        if(arr.length===0 && !(window.MinisBridge.readPendingTx()||'[]').includes('[]') && tries>=2) break;
+      }
       raw = window.MinisBridge.readPendingTx() || '[]';
     } else if(window.MinisBridge && typeof window.MinisBridge.readImportedTx==='function'){
       if(typeof window.MinisBridge.triggerScan==='function') window.MinisBridge.triggerScan();
@@ -1415,9 +1423,10 @@ function txFingerExists(finger){
 }
 
 function makeTx(e,overrides){
+  const amt=isFinite(overrides&&overrides.amount!=null?overrides.amount:e.amount)?(overrides&&overrides.amount!=null?overrides.amount:e.amount):0;
   return Object.assign({
-    id:uid(), time:new Date(e.time).toISOString(), type:e.type, amount:e.amount,
-    note:e.note||'', account:e.account||'', category:e.category||'其他', finger:e.finger
+    id:uid(), time:new Date(e.time).toISOString(), type:e.type,
+    amount:amt, note:e.note||'', account:e.account||'', category:e.category||'其他', finger:e.finger
   }, overrides||{});
 }
 
@@ -1425,18 +1434,19 @@ let autoQueue=[], autoIdx=-1, pendingAutoCount=0, autoRunning=false;
 
 async function autoBookkeep(){
   if(autoRunning) return; autoRunning=true;
-  const q=await readPendingQueue();
-  if(!q.length){
-    // 队列空：提示是否已授权通知使用权（否则用户会困惑为何不自动）
-    if(window.MinisBridge && typeof window.MinisBridge.hasNotifAccess==='function'){
-      try{
-        if(!window.MinisBridge.hasNotifAccess()){
-          setTimeout(()=>ts('自动记账需要先授权「通知使用权」'),500);
-        }
-      }catch(e){}
+  try{
+    const q=await readPendingQueue();
+    if(!q.length){
+      // 队列空：提示是否已授权通知使用权（否则用户会困惑为何不自动）
+      if(window.MinisBridge && typeof window.MinisBridge.hasNotifAccess==='function'){
+        try{
+          if(!window.MinisBridge.hasNotifAccess()){
+            setTimeout(()=>ts('自动记账需要先授权「通知使用权」'),500);
+          }
+        }catch(e){}
+      }
+      return;
     }
-    autoRunning=false; return;
-  }
   const tx=atx();
   let autoN=0, confirmItems=[], autoAck=[];
   const seen=new Set();
@@ -1468,7 +1478,7 @@ async function autoBookkeep(){
     setTimeout(()=>{ts('自动记账 '+pendingAutoCount+' 条（¥'+AUTO_THRESHOLD+' 以内）');pendingAutoCount=0;},400);
   }
   ackPending(autoAck);
-  autoRunning=false;
+  } finally { autoRunning=false; }
 }
 
 function openAutoModal(){document.getElementById('autoConfirmModal').classList.add('show')}
