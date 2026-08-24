@@ -404,6 +404,17 @@ jobs:
               protected void onResume() { super.onResume(); webView.onResume(); }
 
               @Override
+              protected void onWindowFocusChanged(boolean hasFocus) {
+                  super.onWindowFocusChanged(hasFocus);
+                  if (hasFocus && webView != null) {
+                      // 每次回到前台都触发自动记账（处理新收到的支付通知）
+                      mainHandler.postDelayed(new Runnable() { public void run() {
+                          try { webView.evaluateJavascript("try{autoBookkeep()}catch(e){}", null); } catch (Exception ignored) {}
+                      } }, 600);
+                  }
+              }
+
+              @Override
               protected void onDestroy() {
                   webView.loadUrl("about:blank");
                   webView.clearHistory();

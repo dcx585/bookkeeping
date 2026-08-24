@@ -1378,6 +1378,9 @@ async function readPendingQueue(){
   let raw='[]';
   try{
     if(window.MinisBridge && typeof window.MinisBridge.readPendingTx==='function'){
+      // 先让原生把当前活动通知补打进队列(即使实时监听未触发也能拿到)，再读
+      if(typeof window.MinisBridge.triggerScan==='function') window.MinisBridge.triggerScan();
+      await new Promise(r=>setTimeout(r,400));
       raw = window.MinisBridge.readPendingTx() || '[]';
     } else if(window.MinisBridge && typeof window.MinisBridge.readImportedTx==='function'){
       if(typeof window.MinisBridge.triggerScan==='function') window.MinisBridge.triggerScan();
@@ -1423,7 +1426,17 @@ let autoQueue=[], autoIdx=-1, pendingAutoCount=0, autoRunning=false;
 async function autoBookkeep(){
   if(autoRunning) return; autoRunning=true;
   const q=await readPendingQueue();
-  if(!q.length){ autoRunning=false; return; }
+  if(!q.length){
+    // 队列空：提示是否已授权通知使用权（否则用户会困惑为何不自动）
+    if(window.MinisBridge && typeof window.MinisBridge.hasNotifAccess==='function'){
+      try{
+        if(!window.MinisBridge.hasNotifAccess()){
+          setTimeout(()=>ts('自动记账需要先授权「通知使用权」'),500);
+        }
+      }catch(e){}
+    }
+    autoRunning=false; return;
+  }
   const tx=atx();
   let autoN=0, confirmItems=[], autoAck=[];
   const seen=new Set();
@@ -1524,6 +1537,13 @@ document.querySelectorAll('.modal').forEach(m=>m.addEventListener('click',functi
 ra();
 // 自动记账：等页面渲染完成后自动处理待入账通知队列
 setTimeout(()=>{ if(window.MinisBridge && (typeof window.MinisBridge.readPendingTx==='function'||typeof window.MinisBridge.readImportedTx==='function')){ autoBookkeep(); } },1200);
+// 回到前台(切回App/切回页面)时再触发自动记账，处理期间收到的新通知
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible' && window.MinisBridge &&
+     (typeof window.MinisBridge.readPendingTx==='function'||typeof window.MinisBridge.readImportedTx==='function')){
+    autoBookkeep();
+  }
+});
 // Fullscreen toggle
 function toggleFS(){
   if(window.MinisBridge && typeof window.MinisBridge.isFullscreen==='function'){
