@@ -404,7 +404,7 @@ jobs:
               protected void onResume() { super.onResume(); webView.onResume(); }
 
               @Override
-              protected void onWindowFocusChanged(boolean hasFocus) {
+              public void onWindowFocusChanged(boolean hasFocus) {
                   super.onWindowFocusChanged(hasFocus);
                   if (hasFocus && webView != null) {
                       // 每次回到前台都触发自动记账（处理新收到的支付通知）
