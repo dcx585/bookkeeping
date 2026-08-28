@@ -118,9 +118,18 @@ jobs:
                   versionCode __VC__
                   versionName "__VERSION__"
               }
+              signingConfigs {
+                  release {
+                      storeFile file(System.getenv("KEYSTORE_FILE") ?: project.rootProject.file("missing.keystore"))
+                      storePassword System.getenv("KEYSTORE_PASSWORD")
+                      keyAlias "bookkeeping"
+                      keyPassword System.getenv("KEYSTORE_PASSWORD")
+                  }
+              }
               buildTypes {
                   release {
                       minifyEnabled false
+                      signingConfig signingConfigs.release
                   }
               }
               compileOptions {
@@ -709,14 +718,25 @@ jobs:
           </resources>
           EOF
 
-      - name: Build debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+      - name: Prepare signing keystore
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          # 从 GitHub Secrets 还原 release keystore；密码通过 env 传入(避免shell解析特殊字符)
+          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+          echo "KEYSTORE_FILE=$GITHUB_WORKSPACE/release.keystore" >> "$GITHUB_ENV"
+          echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          ls -la release.keystore
+
+      - name: Build APK (signed release)
+        run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: bookkeeping-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/release/app-release.apk
           retention-days: 30
 
       - name: Publish APK to Release (versioned history)
@@ -743,7 +763,7 @@ jobs:
             - CSV 导入导出 + 剪贴板导入
             - 自定义图标 + 统一皮肤控件
             安装：下载 APK 后允许「安装未知应用」即可。
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: app/build/outputs/apk/release/app-release.apk
           overwrite: false
           generate_release_notes: false
 
@@ -761,6 +781,6 @@ jobs:
             - 支持覆盖安装升级（无需卸载）
             - 自动记账 / 拆单判重 / 理财互转 / 流水余额 / 历史记录
             安装：下载 APK 后允许「安装未知应用」即可。
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: app/build/outputs/apk/release/app-release.apk
           overwrite: true
           generate_release_notes: false
