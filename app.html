@@ -448,6 +448,7 @@ input[type=checkbox]{accent-color:var(--accent)}
     <input type="number" id="invEditAmount" placeholder="金额" step="0.01" inputmode="decimal">
     <button class="submit" onclick="saveInvEdit()">更新</button>
     <button class="cancel-btn" onclick="closeInvEdit()">取消</button>
+    <div id="invHistory" style="margin-top:14px;max-height:260px;overflow-y:auto"></div>
   </div>
 </div>
 
@@ -554,15 +555,38 @@ function openInvEdit(name){
   invEditName=name;const a=gi().find(x=>x.name===name);
   document.getElementById('invEditTitle').textContent=name;
   document.getElementById('invEditAmount').value=a?a.amount:'';
+  // 历史记录
+  const hp=document.getElementById('invHistory');
+  const his=(a&&a.his)||[];
+  if(!his.length){hp.innerHTML='<div style="font-size:12px;color:var(--text3)">暂无变更记录</div>'}
+  else{
+    hp.innerHTML='<div style="font-size:13px;color:var(--text2);margin-bottom:6px;font-weight:600">变更历史 ('+his.length+')</div>'+his.map(h=>{
+      const sign=h.delta>=0?'+':'−';
+      return `<div style="font-size:12px;padding:8px 0;border-bottom:1px solid var(--border);line-height:1.6"><span style="color:var(--text3)">${h.t||''}</span><div style="color:var(--text)">${h.note||'更新'}：¥${(h.old||0).toFixed(2)} ${sign} ¥${Math.abs(h.delta).toFixed(2)} = <b style="color:var(--accent)">¥${(h.new||0).toFixed(2)}</b></div></div>`
+    }).join('');
+  }
   document.getElementById('invEditModal').classList.add('show');
 }
 function closeInvEdit(){document.getElementById('invEditModal').classList.remove('show');invEditName=''}
 function saveInvEdit(){
   const v=parseFloat(document.getElementById('invEditAmount').value);
   if(isNaN(v))return ts('请输入有效金额');
-  const d=gi(),a=d.find(x=>x.name===invEditName);
-  if(a){a.amount=v;a.month=new Date().toISOString().slice(0,7)}else d.push({name:invEditName,amount:v,month:new Date().toISOString().slice(0,7)});
-  si(d);closeInvEdit();rac();ts(invEditName+' 已更新');
+  invSetAmount(invEditName, v, '手动更新');
+  closeInvEdit();rac();ts(invEditName+' 已更新');
+}
+// 理财账户金额变更 + 记录历史：a.his = [{t,old,delta,new,note}]
+function invSetAmount(name,newVal,note,ours){
+  const d=gi(),a=d.find(x=>x.name===name);
+  const old=(a?+a.amount:0)||0;
+  newVal=+newVal||0;
+  const hisItem={t:new Date().toISOString().slice(0,16).replace('T',' '),old:old,delta:newVal-old,new:newVal,note:note||''};
+  if(a){
+    if(newVal!==old){a.his=a.his||[];a.his.unshift(hisItem);a.his=a.his.slice(0,50)}
+    a.amount=newVal;a.month=new Date().toISOString().slice(0,7);
+  }else{
+    d.push({name:name,amount:newVal,month:new Date().toISOString().slice(0,7),ours:ours!==false,his:[hisItem]});
+  }
+  si(d);
 }
 async function deleteInv(name){
   if(!await confirmBox('删除理财账户 "'+name+'"？\n（该账户的历史金额将不再计入总资产）'))return;
@@ -575,8 +599,8 @@ function saveNewInv(){
   const n=(document.getElementById('newInvName').value||'').trim();if(!n)return ts('请输入账户名称');
   const d=gi();if(d.find(a=>a.name===n))return ts('账户已存在');
   const v=parseFloat(document.getElementById('newInvAmount').value);
-  d.push({name:n,amount:isNaN(v)?0:v,month:isNaN(v)?'':new Date().toISOString().slice(0,7),ours:document.getElementById('newInvOurs').checked});
-  si(d);closeAddInv();rac();ts('已添加理财账户 '+n);
+  invSetAmount(n,isNaN(v)?0:v,'新增',document.getElementById('newInvOurs').checked);
+  closeAddInv();rac();ts('已添加理财账户 '+n);
 }
 
 // ── Init budgets ──
@@ -779,13 +803,12 @@ function saveTx(){
   closeTxModal();ra();
 }
 // 理财账户余额联动：name 是账户显示名(可能带 "(理财)")，delta 为本次增减(负=减)
-function applyInvDelta(name,delta){
+function applyInvDelta(name,delta,note){
   if(!name||!delta)return;
   const base=name.replace(/\s*\(理财\)\s*$/,'');
   const inv=gi();const idx=inv.findIndex(x=>x.name===base);
   if(idx<0)return;   // 不是理财账户，跳过
-  inv[idx].amount=(+inv[idx].amount||0)+delta;
-  si(inv);
+  invSetAmount(base, (+inv[idx].amount||0)+delta, note||'转账');
 }
 function editTx(id){openTxModal(id)}
 function delTx(id){const old=atx().find(t=>t.id===id);if(old&&old.type==='transfer'){applyInvDelta(old.from,old.amount);applyInvDelta(old.to,-old.amount)}stx(atx().filter(t=>t.id!==id));ra()}
