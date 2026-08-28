@@ -33,6 +33,29 @@ jobs:
         with:
           gradle-version: '8.5'
 
+      - name: Compute version
+        id: ver
+        shell: bash
+        run: |
+          # 读取已有 release tags (v1.0/v1.1/v1.2...)，找最大版本号，下一个=最大+0.1
+          TAGS=$(curl -s -H "Authorization: Bearer ${{ github.token }}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            | grep -oE '"tag_name"[^,]*"v[0-9]+\.[0-9]+"' | grep -oE '[0-9]+\.[0-9]+' || true)
+          MAX_V=1.0
+          for t in $TAGS; do
+            MAJOR=$(echo "$t" | cut -d. -f1); MINOR=$(echo "$t" | cut -d. -f2)
+            CMAJOR=$(echo "$MAX_V" | cut -d. -f1); CMINOR=$(echo "$MAX_V" | cut -d. -f2)
+            if [ "$MAJOR" -gt "$CMAJOR" ] || { [ "$MAJOR" -eq "$CMAJOR" ] && [ "$MINOR" -gt "$CMINOR" ]; }; then MAX_V=$t; fi
+          done
+          MAJOR=$(echo "$MAX_V" | cut -d. -f1); MINOR=$(echo "$MAX_V" | cut -d. -f2)
+          NEW_MINOR=$((MINOR+1))
+          VER="${MAJOR}.${NEW_MINOR}"
+          VC=$((MAJOR*1000 + NEW_MINOR*10 + 1))
+          echo "VERSION_CODE=$VC" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=$VER" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=v$VER" >> "$GITHUB_ENV"
+          echo "Computed version v$VER (versionCode $VC) from max tag $MAX_V"
+
       - name: Create project structure
         run: |
           mkdir -p app/src/main/java/com/minis/bookkeeping
@@ -92,8 +115,8 @@ jobs:
                   applicationId "com.minis.bookkeeping"
                   minSdk 26
                   targetSdk 34
-                  versionCode 1
-                  versionName "1.0"
+                  versionCode __VC__
+                  versionName "__VERSION__"
               }
               buildTypes {
                   release {
@@ -106,6 +129,11 @@ jobs:
               }
           }
           EOF
+
+      - name: Inject version into gradle
+        run: |
+          sed -i 's/__VC__/'"$VERSION_CODE"'/g; s/__VERSION__/'"$VERSION_NAME"'/g' app/build.gradle
+          echo "gradle version: $(grep -E 'versionCode|versionName' app/build.gradle)"
 
       - name: Create AndroidManifest.xml
         run: |
@@ -691,27 +719,48 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
 
-      - name: Publish APK to Release (latest)
+      - name: Publish APK to Release (versioned history)
         if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: Bookkeeping APK（最新版）
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Bookkeeping v${{ env.VERSION_NAME }}
           body: |
-            ## Bookkeeping 记账 APK
+            ## Bookkeeping 记账 APK v${{ env.VERSION_NAME }}
 
-            最新构建自动发布。包含以下功能：
+            - 版本号 v${{ env.VERSION_NAME }}（versionCode ${{ env.VERSION_CODE }}）
+            - 支持覆盖安装升级（无需卸载旧版）
+
+            功能：
             - 支出/收入/转账记账 + 月度统计 + 分类占比
             - 自定义账户管理（现金+理财，均支持新增/删除）
             - 📥 自动记账：打开自动读取支付通知并入账
               · ≤¥30 且走微信/银行卡 → 静默自动入账
               · >¥30、专项资金(规划金/花呗/理财等)、识别不清 → 弹框确认
-              · 智能拆单：一条通知合并多笔 → 自动拆成多笔记账
-              · 智能判重：同交易多条通知/同流水号不重复入账
-            - CSV 导入导出（含账户结构同步）
-            - 剪贴板导入
+              · 智能拆单/智能判重：合并通知自动拆多笔、同交易不重复
+            - 转账支持理财账户互转、理财↔现金互转，理财余额联动+历史记录
+            - 流水显示每笔后账户余额变化
+            - CSV 导入导出 + 剪贴板导入
             - 自定义图标 + 统一皮肤控件
-            - 自动记账专用确认框（可改账户/分类/金额）
+            安装：下载 APK 后允许「安装未知应用」即可。
+          files: app/build/outputs/apk/debug/app-debug.apk
+          overwrite: false
+          generate_release_notes: false
+
+      - name: Publish APK to Release (latest)
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Bookkeeping APK（最新版 v${{ env.VERSION_NAME }}）
+          body: |
+            ## Bookkeeping 记账 APK v${{ env.VERSION_NAME }}
+
+            这是最新版（版本 v${{ env.VERSION_NAME }}）。可在 Releases 历史里下载旧版本。
+
+            - 支持覆盖安装升级（无需卸载）
+            - 自动记账 / 拆单判重 / 理财互转 / 流水余额 / 历史记录
             安装：下载 APK 后允许「安装未知应用」即可。
           files: app/build/outputs/apk/debug/app-debug.apk
           overwrite: true
+          generate_release_notes: false
