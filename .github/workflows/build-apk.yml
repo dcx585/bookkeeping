@@ -536,10 +536,56 @@ jobs:
               private boolean queueHasNkey(String nkey) throws Exception {
                   if (nkey == null) return false;
                   synchronized (LOCK) {
+                      // 1) 已处理集合里有 → 永不追加(已入账/已确认/已跳过的通知不再回来)
+                      if (nkeyInSeen(nkey)) return true;
+                      // 2) 队列里还有未处理的同一条 → 跳过
                       File qf = queueFile();
-                      if (!qf.exists()) return false;
-                      byte[] b = new byte[(int) Math.min(qf.length(), 4*1024*1024)];
-                      FileInputStream fi = new FileInputStream(qf);
+                      if (qf.exists()) {
+                         byte[] b = new byte[(int) Math.min(qf.length(), 4*1024*1024)];
+                         FileInputStream fi = new FileInputStream(qf);
+                         int off=0, r; while(off<b.length && (r=fi.read(b,off,b.length-off))>0){off+=r;}
+                         fi.close();
+                         String s = new String(b,0,off,"UTF-8");
+                         if (s.contains("\"nkey\":\"" + nkey.replace("\\","\\\\").replace("\"","\\\"") + "\"")) return true;
+                      }
+                      return false;
+                  }
+              }
+              private File seenFile() { return new File(getFilesDir(), "seen_nkeys.json"); }
+              private void markSeen(String nkey) throws Exception {
+                  if (nkey == null || nkey.isEmpty()) return;
+                  synchronized (LOCK) {
+                      File sf = seenFile();
+                      String cur = "";
+                      if (sf.exists()) {
+                         byte[] b = new byte[(int) Math.min(sf.length(), 4*1024*1024)];
+                         FileInputStream fi = new FileInputStream(sf);
+                         int off=0, r; while(off<b.length && (r=fi.read(b,off,b.length-off))>0){off+=r;}
+                         fi.close(); cur = new String(b,0,off,"UTF-8");
+                      }
+                      if (cur.contains("\"nkey\":\"" + nkey.replace("\\","\\\\").replace("\"","\\\"") + "\"")) return; // 已记过
+                      String add = "{\"nkey\":\"" + esc(nkey) + "\"}";
+                      String next;
+                      if (cur.trim().isEmpty() || cur.trim().equals("[]")) {
+                          next = "[" + add + "]";
+                      } else {
+                          String base = cur.trim();
+                          if (base.endsWith("]")) base = base.substring(0, base.length()-1);
+                          if (base.endsWith(",")) base = base.substring(0, base.length()-1);
+                          next = base + "," + add + "]";
+                      }
+                      FileOutputStream fo = new FileOutputStream(sf);
+                      fo.write(next.getBytes("UTF-8"));
+                      fo.close();
+                  }
+              }
+              private boolean nkeyInSeen(String nkey) throws Exception {
+                  if (nkey == null) return false;
+                  synchronized (LOCK) {
+                      File sf = seenFile();
+                      if (!sf.exists()) return false;
+                      byte[] b = new byte[(int) Math.min(sf.length(), 4*1024*1024)];
+                      FileInputStream fi = new FileInputStream(sf);
                       int off=0, r; while(off<b.length && (r=fi.read(b,off,b.length-off))>0){off+=r;}
                       fi.close();
                       String s = new String(b,0,off,"UTF-8");
@@ -585,7 +631,11 @@ jobs:
                           boolean drop=false;
                           java.util.regex.Matcher im = java.util.regex.Pattern.compile("\"id\":\"([^\"]+)\"").matcher(obj);
                           if (im.find() && set.contains(im.group(1))) drop=true;
-                          if (!drop) {
+                          if (drop) {
+                              // 该条目已处理：把 nkey 记入 seen 集合，防止 triggerScan 再把通知栏残留的同一条加回来
+                              java.util.regex.Matcher nm = java.util.regex.Pattern.compile("\"nkey\":\"([^\"]+)\"").matcher(obj);
+                              if (nm.find()) { try { markSeen(nm.group(1)); } catch (Exception ignored) {} }
+                          } else {
                               if (!first) out.append(",");
                               first=false;
                               out.append(obj);

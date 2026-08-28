@@ -610,17 +610,45 @@ function rtx(){
   if(cv!=='tx'){l.style.display='none';return}
   l.style.display='block';
   let f=tx;if(sq)f=tx.filter(t=>(t.note||'').toLowerCase().includes(sq)||(t.category||'').toLowerCase().includes(sq)||(t.account||'').toLowerCase().includes(sq));
+  // 计算每笔交易后该账户的余额(图二效果: 显示"这笔之后账户剩多少钱")
+  // 先按账户、按时间正序累加该账户此时点的余额
+  let balAt={};
+  if(!sq){
+    const all=atx().slice().sort((a,b)=>a.time.localeCompare(b.time));
+    const accMap={};
+    all.forEach(t=>{
+      if(t.type==='transfer'){const fee=t.fee||0,fp=t.feePayer||'from';
+        accMap[t.from]=(accMap[t.from]||0)-t.amount-(fp==='from'?fee:0);
+        accMap[t.to]=(accMap[t.to]||0)+t.amount-(fp==='to'?fee:0);
+        balAt[t.id]={from:accMap[t.from],to:accMap[t.to]};
+      } else if(t.account){
+        accMap[t.account]=(accMap[t.account]||0)+(t.type==='income'?t.amount:-t.amount);
+        balAt[t.id]={acc:accMap[t.account]};
+      }
+    });
+  }
   l.innerHTML=!f.length?(sq?'<div class="empty-state">没有匹配"'+sq+'"</div>':'<div class="empty-state">本月暂无记录<br>点 + 开始记账</div>'):f.map((t,i)=>{
     const isE=t.type==='expense',isI=t.type==='income',isT=t.type==='transfer';
     let sign=isE?'−':isI?'+':'⇄';const d=new Date(t.time);
+    // 该笔后的余额
+    let balHtml='';
+    if(!sq&&(balAt[t.id])!==undefined){
+      const b=balAt[t.id];
+      if(isT){
+        balHtml=`<div class="meta" style="color:var(--text3)">余额 ${t.from} ¥${(b.from||0).toFixed(2)} → ${t.to} ¥${(b.to||0).toFixed(2)}</div>`;
+      } else {
+        balHtml=`<div class="meta" style="color:var(--text3)">该账户余额 ¥${((b.acc!=null?b.acc:0)).toFixed(2)}</div>`;
+      }
+    }
     return `<div class="tx-item" style="animation-delay:${i*55}ms" onclick="editTx('${t.id}')">
-      <div class="info"><div class="title">${t.note||(isT?'转账':isE?'支出':'收入')}${isT&&t.fee?`<span style="font-size:11px;color:var(--text3)"> 手续费 ¥${t.fee.toFixed(2)}(${t.feePayer==='to'?'转入方付':'转出方付'})</span>`:''}</div><div class="meta">${d.getMonth()+1}/${d.getDate()} · ${isT?t.from+' → '+t.to:[t.account,t.category].filter(Boolean).join(' · ')}</div></div>
+      <div class="info"><div class="title">${t.note||(isT?'转账':isE?'支出':'收入')}${isT&&t.fee?`<span style="font-size:11px;color:var(--text3)"> 手续费 ¥${t.fee.toFixed(2)}(${t.feePayer==='to'?'转入方付':'转出方付'})</span>`:''}</div><div class="meta">${d.getMonth()+1}/${d.getDate()} · ${isT?t.from+' → '+t.to:[t.account,t.category].filter(Boolean).join(' · ')}</div>${balHtml}</div>
       <div class="amount ${isE?'exp':isI?'inc':''}" style="${isT?'color:var(--gold)':''}">${sign}¥${t.amount.toFixed(2)}</div>
       <div class="del-btn" onclick="event.stopPropagation();delTx('${t.id}')">×</div>
     </div>`;
   }).join('');
   const exp=tx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
   const inc=tx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+  const trx=tx.filter(t=>t.type==='transfer').reduce((s,t)=>s+t.amount,0);
   document.getElementById('totalExpense').textContent='¥'+exp.toFixed(2);
   document.getElementById('totalIncome').textContent='¥'+inc.toFixed(2);
   document.getElementById('balance').textContent='¥'+(inc-exp).toFixed(2);
@@ -665,6 +693,20 @@ function quickAddRecurring(cat,amt){
   document.getElementById('txSubmit').textContent='确认支出';
 }
 
+// 全局账户余额计算(现金账户)：供记账/转账/账户选择器显示实时余额
+function getCashBalances(){
+  const am={};atx().forEach(t=>{
+    if(t.type==='transfer'){const fee=t.fee||0,fp=t.feePayer||'from';am[t.from]=(am[t.from]||0)-t.amount-(fp==='from'?fee:0);am[t.to]=(am[t.to]||0)+t.amount-(fp==='to'?fee:0)}
+    else if(t.account)am[t.account]=(am[t.account]||0)+(t.type==='income'?t.amount:-t.amount);
+  });
+  return am;
+}
+function getAcctBalance(acct){
+  if(!acct)return 0;
+  const isInv=acct.endsWith('(理财)');
+  if(isInv){const n=acct.replace(/\s*\(理财\)\s*$/,'');const a=gi().find(x=>x.name===n);return (a&&a.amount!=null)?a.amount:0}
+  return (getCashBalances()[acct]||0);
+}
 function rac(){
   const sv=document.getElementById('acctsView');
   if(cv!=='accts'){sv.classList.remove('show');return}
@@ -728,16 +770,32 @@ function saveTx(){
   const data=atx();const entry={id:eid||uid(),time:d+'T12:00:00',type:ct,amount:a,note:n};
   if(ct==='transfer'){entry.from=document.getElementById('txFromBtn').textContent;entry.to=document.getElementById('txToBtn').textContent;if(entry.from==='转出'||entry.to==='转入')return ts('请选择账户');if(entry.from===entry.to)return ts('不能转到同一账户');const fee=parseFloat(document.getElementById('txFee').value)||0;if(fee>0){entry.fee=fee;entry.feePayer=document.getElementById('txFeePayer').value}else{delete entry.fee;delete entry.feePayer}}
   else{entry.account=document.getElementById('txAcctBtn').textContent;entry.category=document.getElementById('txCatBtn').textContent;if(entry.account==='账户')entry.account='';if(entry.category==='分类')entry.category=''}
+  // 针对已有交易(编辑)先回滚理财金额
+  if(eid){const old=data.find(t=>t.id===eid);if(old&&old.type==='transfer'){applyInvDelta(old.from,-old.amount);applyInvDelta(old.to,old.amount)}}
   if(eid){const i=data.findIndex(t=>t.id===eid);if(i>=0)Object.assign(data[i],entry)}else data.push(entry);
-  stx(data);closeTxModal();ra();
+  stx(data);
+  // 转账涉及理财账户 → 联动更新理财账户余额
+  if(ct==='transfer'){applyInvDelta(entry.from,-entry.amount);applyInvDelta(entry.to,entry.amount)}
+  closeTxModal();ra();
+}
+// 理财账户余额联动：name 是账户显示名(可能带 "(理财)")，delta 为本次增减(负=减)
+function applyInvDelta(name,delta){
+  if(!name||!delta)return;
+  const base=name.replace(/\s*\(理财\)\s*$/,'');
+  const inv=gi();const idx=inv.findIndex(x=>x.name===base);
+  if(idx<0)return;   // 不是理财账户，跳过
+  inv[idx].amount=(+inv[idx].amount||0)+delta;
+  si(inv);
 }
 function editTx(id){openTxModal(id)}
-function delTx(id){stx(atx().filter(t=>t.id!==id));ra()}
+function delTx(id){const old=atx().find(t=>t.id===id);if(old&&old.type==='transfer'){applyInvDelta(old.from,old.amount);applyInvDelta(old.to,-old.amount)}stx(atx().filter(t=>t.id!==id));ra()}
 function st2(type,btn){ct=type;document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const isT=type==='transfer';document.getElementById('txCatRow').style.display=isT?'none':'flex';document.getElementById('txTransferRow').style.display=isT?'flex':'none';document.getElementById('txFeeRow').style.display=isT?'flex':'none';document.getElementById('txSubmit').textContent=isT?'确认转账':type==='expense'?'确认支出':'确认收入';document.getElementById('txCatBtn').textContent='分类';document.getElementById('txCatBtn').classList.remove('selected')}
 
 // ── Picker ──
 let pT='',pS='';
-function openPicker(type,sub){pT=type;pS=sub||'';let ops=type==='account'?ga():ct==='income'?INC_CATS:CATS;
+function openPicker(type,sub){pT=type;pS=sub||'';
+  // 转账模式(from/to) 显示 现金+理财 账户，支持现金↔理财/理财↔理财互转
+  let ops=type==='account'?(pS==='from'||pS==='to'?ga().concat(gi().filter(a=>a.ours!==false).map(a=>a.name+' (理财)')):ga()):ct==='income'?INC_CATS:CATS;
   if(type==='category'){
     ops=ops.filter(o=>!gc('hidden_'+ct).includes(o));
     ops=ops.concat(gc(ct));
@@ -750,7 +808,10 @@ function openPicker(type,sub){pT=type;pS=sub||'';let ops=type==='account'?ga():c
   let h=ops.map(o=>{
     const isCust=type==='category'&&gc(ct).includes(o);
     const isRecur=type==='category'&&(gb()[o]||{}).recurring;
-    return `<div class="picker-row"><div onclick="sp('${o.replace(/'/g,"\\'")}')" style="display:flex;align-items:center;flex:1">${type==='category'?'<div class="pick-dot" style="background:'+cc(o)+'"></div>':''}<span>${o}</span>${isRecur?'<span style="font-size:10px;margin-left:4px;color:var(--gold)">固定</span>':''}${o===cur?'<span class="pick-check">✓</span>':''}</div>${type==='category'?`<span onclick="toggleCatRecurring('${o.replace(/'/g,"\\'")}')" style="font-size:${isRecur?'14':'16'}px;padding:0 6px;cursor:pointer;color:${isRecur?'var(--gold)':'var(--text3)'}">${isRecur?'⭐':'☆'}</span><span onclick="deleteCatItem('${o.replace(/'/g,"\\'")}')" style="font-size:18px;padding:0 4px;cursor:pointer;color:var(--text3)">×</span>`:''}</div>`;
+    // 账户模式：显示当前余额
+    const balNum = type==='account' ? getAcctBalance(o) : 0;
+    const balHtml = type==='account' ? `<span style="margin-left:auto;margin-right:8px;font-size:13px;color:${balNum<0?'var(--danger,red)':'var(--text2)'}">¥${Math.abs(balNum).toFixed(2)}</span>` : '';
+    return `<div class="picker-row"><div onclick="sp('${o.replace(/'/g,"\\'")}')" style="display:flex;align-items:center;flex:1">${type==='category'?'<div class="pick-dot" style="background:'+cc(o)+'"></div>':''}<span>${o}</span>${balHtml}${isRecur?'<span style="font-size:10px;margin-left:4px;color:var(--gold)">固定</span>':''}${o===cur?'<span class="pick-check">✓</span>':''}</div>${type==='category'?`<span onclick="toggleCatRecurring('${o.replace(/'/g,"\\'")}')" style="font-size:${isRecur?'14':'16'}px;padding:0 6px;cursor:pointer;color:${isRecur?'var(--gold)':'var(--text3)'}">${isRecur?'⭐':'☆'}</span><span onclick="deleteCatItem('${o.replace(/'/g,"\\'")}')" style="font-size:18px;padding:0 4px;cursor:pointer;color:var(--text3)">×</span>`:''}</div>`;
   }).join('');
   if(type==='category'){
     const hid=gc('hidden_'+ct);
@@ -1223,9 +1284,12 @@ async function doImportScan(){
       raw = x.responseText;
     }
     impTx=JSON.parse(raw||'[]');
-    // 原生抓的是原始通知 {app,title,text}，需解析成记账格式(支持一条多笔)
+    // 原生抓的是原始通知 {app,title,text,id,nkey}，需解析成记账格式(支持一条多笔)
     if(impTx.length && !impTx[0].amount){
-      impTx = impTx.flatMap(n=>parseNotifMulti(n)).filter(Boolean);
+      impTx = impTx.flatMap(n=>{
+        const parsed = parseNotifMulti(n);
+        return parsed.map(p=>Object.assign({}, p, {_rawId:n.id, _rawNkey:n.nkey}));
+      }).filter(Boolean);
     }
     if(!impTx.length){
       // 通知可能未授权
@@ -1254,11 +1318,16 @@ function doImportConfirm(){
   const checked=document.querySelectorAll('#importNotifyList input:checked');
   if(!checked.length)return ts('请至少选择一条');
   const tx=atx(),today=new Date().toISOString().slice(0,10);
+  const ackIds=[];
   checked.forEach(cb=>{
     const t=impTx[parseInt(cb.dataset.idx)];
-    tx.push({id:uid(),time:today+'T12:00:00',type:t.type,amount:t.amount,note:t.note||'',account:t.account||'',category:t.category||'其他'});
+    tx.push({id:uid(),time:today+'T12:00:00',type:t.type,amount:t.amount,note:t.note||'',account:t.account||'',category:t.category||'其他',finger:t.finger});
+    if(t._rawId) ackIds.push(t._rawId);
   });
   stx(tx);closeImportNotify();ra();ts('已导入 '+checked.length+' 条');
+  // 关键：确认导入后 ack 这些条目，让原生把 nkey 记入已处理集合，杜绝下次扫描再出现
+  if(ackIds.length) ackPending(ackIds);
+  doImportScan(); // 重新扫描刷新列表，清除已导入的
 }
 
 // ── 自动记账模块 ──
