@@ -1308,10 +1308,10 @@ async function doImportScan(){
     }
     impTx=JSON.parse(raw||'[]');
     const rawArr = impTx; // 保存原生抓到的原始通知数组，用于诊断
-    // 原生抓的是原始通知 {app,title,text,id,nkey}，需解析成记账格式(支持一条多笔)
+    // 原生抓的是原始通知 {app,title,text,id,nkey}，用parseNotifFull解析成完整记账格式(带finger,支持多笔)
     if(impTx.length && !impTx[0].amount){
       impTx = impTx.flatMap(n=>{
-        const parsed = parseNotifMulti(n);
+        const parsed = parseNotifFull(n);
         return parsed.map(p=>Object.assign({}, p, {_rawId:n.id, _rawNkey:n.nkey, _src:'notice'}));
       }).filter(Boolean);
     }
@@ -1327,9 +1327,9 @@ async function doImportScan(){
         const cutoff=now-30*24*3600*1000;
         const recent=smsArr.filter(s=>!s.date||s.date>=cutoff);
         const smsTx = recent.map(s=>{
-          // 短信正文即支付信息, 直接当原始通知解析
-          const n={title:'' , text:s.body||'', app:s.address||''};
-          const parsed = parseNotifMulti(n);
+          // 短信正文即支付信息, 用parseNotifFull解析(带finger,可判重不重复入账)
+          const n={title:'' , text:s.body||'', app:s.address||'', time:s.date};
+          const parsed = parseNotifFull(n);
           return parsed.map(p=>Object.assign({}, p, {_rawId:'sms_'+s.date, _rawNkey:'sms_'+s.date, _src:'sms', _smsAddress:s.address, _smsDate:s.date}));
         }).flat();
         // 用短信解析结果（优先级高，银行支付短信最可靠）；按时间降序 + 去重(同短信nkey只留一条)
@@ -1342,6 +1342,13 @@ async function doImportScan(){
           }).sort((a,b)=>(b._smsDate||0)-(a._smsDate||0));
         }
       }
+    }
+    // 统一过滤: 已入账的交易(按finger判重)不再显示 → 已记的不重复出现/不重复入账
+    if(impTx.length){
+      impTx = impTx.filter(t=>{
+        if(t.finger && txFingerExists(t.finger)) return false; // 已在账本 → 隐藏
+        return true;
+      });
     }
     if(!impTx.length){
       // 通知可能未授权
