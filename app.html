@@ -1349,9 +1349,12 @@ async function doImportScan(){
         }
       }
     }
-    // 统一过滤: 已入账的交易(按finger判重)不再显示 → 已记的不重复出现/不重复入账
+    // 统一过滤: 已入账的交易(按finger判重)不再显示 + 用户忽略的不再显示 → 已记的不重复/不想记的删掉
     if(impTx.length){
+      let skipSet=new Set();
+      try{ skipSet=new Set(JSON.parse(localStorage.getItem(IMP_SKIP_KEY)||'[]')); }catch(e){}
       impTx = impTx.filter(t=>{
+        if(t._rawNkey && skipSet.has(t._rawNkey)) return false; // 用户已忽略 → 隐藏
         if(t.finger && txFingerExists(t.finger)) return false; // 已在账本 → 隐藏
         return true;
       });
@@ -1380,10 +1383,30 @@ async function doImportScan(){
     document.getElementById('importNotifyList').innerHTML=impTx.map((t,i)=>`<div style="display:flex;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:8px;font-size:14px">
       <input type="checkbox" checked data-idx="${i}" style="width:18px;height:18px">
       <span style="flex:1"><b>¥${t.amount.toFixed(2)}</b> ${t.type==='income'?'收入':'支出'} · ${t.category}${t.account?' · '+t.account:''}<br><span style="font-size:12px;color:var(--text2)">${t.note||''}</span></span>
+      <button onclick="delImpItem(${i})" style="background:none;border:none;color:#e55;font-size:18px;padding:0 6px;cursor:pointer" title="忽略(不再显示)">×</button>
     </div>`).join('');
     document.getElementById('importConfirmBtn').style.display='block';
   }catch(e){
     document.getElementById('importNotifyStatus').textContent='扫描失败：'+e.message;
+  }
+}
+// 忽略某条导入候选(从列表移除+记入忽略集,下次扫描不再出现)
+const IMP_SKIP_KEY='minis_import_skip_v1';
+function delImpItem(i){
+  const t=impTx[i]; if(!t) return;
+  const skip=JSON.parse(localStorage.getItem(IMP_SKIP_KEY)||'[]');
+  if(t._rawNkey && !skip.includes(t._rawNkey)) skip.push(t._rawNkey);
+  localStorage.setItem(IMP_SKIP_KEY,JSON.stringify(skip));
+  impTx.splice(i,1);
+  ts('已忽略，下次扫描不再显示');
+  if(!impTx.length){ document.getElementById('importNotifyList').innerHTML=''; document.getElementById('importConfirmBtn').style.display='none'; document.getElementById('importNotifyStatus').textContent='已全部忽略，无可导入项。'; }
+  else {
+    // 重新渲染
+    document.getElementById('importNotifyList').innerHTML=impTx.map((t,idx)=>`<div style="display:flex;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:8px;font-size:14px">
+      <input type="checkbox" checked data-idx="${idx}" style="width:18px;height:18px">
+      <span style="flex:1"><b>¥${t.amount.toFixed(2)}</b> ${t.type==='income'?'收入':'支出'} · ${t.category}${t.account?' · '+t.account:''}<br><span style="font-size:12px;color:var(--text2)">${t.note||''}</span></span>
+      <button onclick="delImpItem(${idx})" style="background:none;border:none;color:#e55;font-size:18px;padding:0 6px;cursor:pointer" title="忽略(不再显示)">×</button>
+    </div>`).join('');
   }
 }
 function doImportConfirm(){
