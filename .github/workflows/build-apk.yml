@@ -291,16 +291,34 @@ jobs:
                   }
                   @JavascriptInterface
                   public String readSms() {
-                      // 读短信收件箱最近N条，返回[{address,body,date}]；银行/支付短信多来自收件箱
+                      // 读短信收件箱最近N条，返回[{address,body,date}]。适配vivo/国产机: 先试标准Inbox,失败再试全量content://sms
                       try {
                           android.content.ContentResolver cr = getContentResolver();
-                          android.database.Cursor c = cr.query(
-                              android.provider.Telephony.Sms.Inbox.CONTENT_URI,
-                              new String[]{"address", "body", "date"},
-                              null, null, "date DESC");
+                          android.database.Cursor c = null;
+                          // vivo等厂商收件箱可能不全, 优先用全量content://sms(收件箱+已发送), 按时间倒序
+                          android.net.Uri[] uris = {
+                              android.net.Uri.parse("content://sms/inbox"),
+                              android.net.Uri.parse("content://sms")
+                          };
+                          for (android.net.Uri u : uris) {
+                              try {
+                                  // type=1 收件箱(收到的短信, 支付短信都在这)。含已发送会混入杂讯,故只要type=1
+                                  c = cr.query(u, new String[]{"address","body","date"},
+                                      "type=1", null, "date DESC");
+                              } catch (Exception ei) { c = null; }
+                              if (c != null && c.getCount() > 0) break;
+                              if (c != null) { c.close(); c = null; }
+                          }
+                          if (c == null) {
+                              // 最后兜底: 无type过滤
+                              try {
+                                  c = cr.query(android.net.Uri.parse("content://sms"),
+                                      new String[]{"address","body","date"}, null, null, "date DESC");
+                              } catch (Exception e2) { c = null; }
+                          }
                           if (c == null) return "[]";
                           StringBuilder sb = new StringBuilder("[\n");
-                          int cnt = 0, MAX = 60;
+                          int cnt = 0, MAX = 200;
                           while (c.moveToNext() && cnt < MAX) {
                               if (cnt > 0) sb.append(",\n");
                               String addr = c.getString(c.getColumnIndex("address"));
