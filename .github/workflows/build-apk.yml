@@ -153,6 +153,8 @@ jobs:
               <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
               <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
               <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" />
+              <uses-permission android:name="android.permission.READ_SMS" />
+              <uses-permission android:name="android.permission.RECEIVE_SMS" />
               <application
                   android:allowBackup="true"
                   android:icon="@mipmap/ic_launcher"
@@ -209,6 +211,8 @@ jobs:
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
           import java.io.File;
+          import android.database.Cursor;
+          import android.provider.Telephony;
 
           public class MainActivity extends Activity {
               private WebView webView;
@@ -278,6 +282,33 @@ jobs:
                           }
                       } catch (Exception e) {}
                       return "[]";
+                  }
+                  @JavascriptInterface
+                  public String readSms() {
+                      // 读短信收件箱最近N条，返回[{address,body,date}]；银行/支付短信多来自收件箱
+                      try {
+                          android.content.ContentResolver cr = getContentResolver();
+                          android.database.Cursor c = cr.query(
+                              android.provider.Telephony.Sms.Inbox.CONTENT_URI,
+                              new String[]{"address", "body", "date"},
+                              null, null, "date DESC");
+                          if (c == null) return "[]";
+                          StringBuilder sb = new StringBuilder("[\n");
+                          int cnt = 0, MAX = 60;
+                          while (c.moveToNext() && cnt < MAX) {
+                              if (cnt > 0) sb.append(",\n");
+                              String addr = c.getString(c.getColumnIndex("address"));
+                              String body = c.getString(c.getColumnIndex("body"));
+                              long date = c.getLong(c.getColumnIndex("date"));
+                              sb.append("{\"address\":\"").append(esc(String.valueOf(addr)))
+                                .append("\",\"body\":\"").append(esc(String.valueOf(body)))
+                                .append("\",\"date\":").append(date).append("}");
+                              cnt++;
+                          }
+                          c.close();
+                          sb.append("\n]");
+                          return sb.toString();
+                      } catch (Exception e) { return "[]"; }
                   }
                   @JavascriptInterface
                   public void triggerScan() {
@@ -410,6 +441,25 @@ jobs:
                       }
                   });
                   webView.loadUrl("file:///android_asset/app.html");
+              }
+
+              @Override
+              public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+                  super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+                  // 权限结果不需要额外处理，readSms/读通知时若未授权会返回空，JS端可提示
+              }
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+                  // 主动请求短信读取权限(安全/银行支付短信), 若上次未授权则再次尝试提示
+                  if (android.os.Build.VERSION.SDK_INT >= 23) {
+                      try {
+                          if (checkSelfPermission(android.Manifest.permission.READ_SMS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                              requestPermissions(new String[]{android.Manifest.permission.READ_SMS}, 1001);
+                          }
+                      } catch (Exception e) {}
+                  }
               }
 
               @Override
