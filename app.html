@@ -1397,6 +1397,9 @@ function findAmounts(s){
     const amtMatch=m[0].match(/\d+(?:\.\d{1,2})?/);
     const amt=amtMatch?parseFloat(amtMatch[0]):null;
     if(amt==null) continue;
+    // 排除"余额/剩余/结余/账户余额"等字段后的金额——它描述账户余额，不是交易金额
+    const before=s.slice(Math.max(0,m.index-5),m.index);
+    if(/余额|剩余|结余/.test(before)) continue;
     out.push({amt, pos:m.index, len:m[0].length});
   }
   return out;
