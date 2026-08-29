@@ -222,6 +222,12 @@ jobs:
 
               // ── JavaScript bridge: JS calls App.readClipboard() / App.fullscreen() etc ──
               public class AppBridge {
+                  private String esc(String s) {
+                      if (s == null) return "";
+                      return s.replace("\\", "\\\\").replace("\"", "\\\"")
+                              .replace("\n", "\\n").replace("\r", "\\r")
+                              .replace("\t", "\\t");
+                  }
                   @JavascriptInterface
                   public String readClipboard() {
                       try {
@@ -450,19 +456,6 @@ jobs:
               }
 
               @Override
-              protected void onResume() {
-                  super.onResume();
-                  // 主动请求短信读取权限(安全/银行支付短信), 若上次未授权则再次尝试提示
-                  if (android.os.Build.VERSION.SDK_INT >= 23) {
-                      try {
-                          if (checkSelfPermission(android.Manifest.permission.READ_SMS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                              requestPermissions(new String[]{android.Manifest.permission.READ_SMS}, 1001);
-                          }
-                      } catch (Exception e) {}
-                  }
-              }
-
-              @Override
               protected void onActivityResult(int req, int res, Intent data) {
                   super.onActivityResult(req, res, data);
                   if (req == FILE_CHOOSER) {
@@ -488,7 +481,17 @@ jobs:
               protected void onPause() { super.onPause(); webView.onPause(); }
 
               @Override
-              protected void onResume() { super.onResume(); webView.onResume(); }
+              protected void onResume() {
+                  super.onResume(); webView.onResume();
+                  // 主动请求短信读取权限(银行/支付短信), 若未授权则提示授权
+                  if (android.os.Build.VERSION.SDK_INT >= 23) {
+                      try {
+                          if (checkSelfPermission(android.Manifest.permission.READ_SMS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                              requestPermissions(new String[]{android.Manifest.permission.READ_SMS}, 1001);
+                          }
+                      } catch (Exception e) {}
+                  }
+              }
 
               @Override
               public void onWindowFocusChanged(boolean hasFocus) {
