@@ -1312,8 +1312,25 @@ async function doImportScan(){
     if(impTx.length && !impTx[0].amount){
       impTx = impTx.flatMap(n=>{
         const parsed = parseNotifMulti(n);
-        return parsed.map(p=>Object.assign({}, p, {_rawId:n.id, _rawNkey:n.nkey}));
+        return parsed.map(p=>Object.assign({}, p, {_rawId:n.id, _rawNkey:n.nkey, _src:'notice'}));
       }).filter(Boolean);
+    }
+    // 通知没解析出支付 → 尝试读短信收件箱(银行/支付短信多来自收件箱,最可靠)
+    if(!impTx.length && window.MinisBridge && typeof window.MinisBridge.readSms==='function'){
+      let smsRaw=null;
+      try{ smsRaw = window.MinisBridge.readSms(); }catch(e){ smsRaw=null; }
+      if(smsRaw){
+        let smsArr=[];
+        try{ smsArr=JSON.parse(smsRaw||'[]'); }catch(e){ smsArr=[]; }
+        const smsTx = smsArr.map(s=>{
+          // 短信正文即支付信息, 直接当原始通知解析
+          const n={title:'' , text:s.body||'', app:s.address||''};
+          const parsed = parseNotifMulti(n);
+          return parsed.map(p=>Object.assign({}, p, {_rawId:'sms_'+s.date, _rawNkey:'sms_'+s.date, _src:'sms', _smsAddress:s.address, _smsDate:s.date}));
+        }).flat();
+        // 用短信解析结果（优先级高，银行支付短信最可靠）
+        if(smsTx.length) impTx = smsTx;
+      }
     }
     if(!impTx.length){
       // 通知可能未授权
