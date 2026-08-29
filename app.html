@@ -1292,6 +1292,7 @@ async function doImportScan(){
   document.getElementById('importNotifyStatus').textContent='扫描中...';
   document.getElementById('importConfirmBtn').style.display='none';
   impTx=[];
+  let smsDiagInfo='';
   try{
     let raw=null;
     if(window.MinisBridge && typeof window.MinisBridge.readImportedTx==='function'){
@@ -1322,6 +1323,11 @@ async function doImportScan(){
       if(smsRaw){
         let smsArr=[];
         try{ smsArr=JSON.parse(smsRaw||'[]'); }catch(e){ smsArr=[]; }
+        // 诊断: 记录readSms实际读到的原始条数+最新时间, 用于排查"读不全/截断"
+        if(smsArr.length){
+          const latest=smsArr.map(s=>s.date).reduce((a,b)=>Math.max(a,b||0),0);
+          smsDiagInfo='短信读到 '+smsArr.length+' 条, 最新:'+(latest?new Date(latest).toLocaleString():'?');
+        } else { smsDiagInfo='短信读到 0 条(可能未授权READ_SMS或库为空)'; }
         // 默认只看最近30天的短信(避免一堆历史老短信刷屏), 按时间降序(最新在前)
         const now=Date.now();
         const cutoff=now-30*24*3600*1000;
@@ -1361,11 +1367,12 @@ async function doImportScan(){
         }
       }
       // 诊断：区分「完全没抓到」vs「抓到了但解析不出金额」
+      let diag = smsDiagInfo ? ('\n['+smsDiagInfo+']') : '';
       if(rawArr.length){
         const sample = rawArr.slice(0,4).map(n=>(n.app||'')+'|'+(n.title||'')+'|'+(n.text||'')).join('\n');
-        document.getElementById('importNotifyStatus').textContent='未发现支付通知。原生抓到 '+rawArr.length+' 条但没解析出金额:\n'+sample;
+        document.getElementById('importNotifyStatus').textContent='未发现支付通知。原生抓到 '+rawArr.length+' 条但没解析出金额:'+diag+'\n'+sample;
       } else {
-        document.getElementById('importNotifyStatus').textContent='未发现支付通知。请保留银行/微信/支付宝支付通知，然后在通知栏确认后重新扫描。';
+        document.getElementById('importNotifyStatus').textContent='未发现支付通知。'+diag+'\n请保留银行/微信/支付宝支付通知/短信，然后重新扫描。';
       }
       return;
     }
