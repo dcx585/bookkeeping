@@ -528,10 +528,16 @@ jobs:
               private void appendNotification(StatusBarNotification sbn) throws Exception {
                   Notification n = sbn.getNotification();
                   if (n == null || n.extras == null) return;
+                  // 短信/支付通知正文可能存放在多个字段：textLines(含换行的正文)、text、bigText、subText
                   String title = str(n.extras.getCharSequence("android.title"));
                   String text = str(n.extras.getCharSequence("android.text"));
                   String big = str(n.extras.getCharSequence("android.bigText"));
-                  String combined = title + " | " + text + " " + big;
+                  String textLines = str(n.extras.getCharSequence("android.textLines"));
+                  String sub = str(n.extras.getCharSequence("android.subText"));
+                  String sum = str(n.extras.getCharSequence("android.summaryText"));
+                  // 合并所有可能存正文的字段；textLines(短信正文)优先级高，避免遗漏
+                  String fulltext = (textLines + " " + text + " " + big + " " + sub + " " + sum).trim();
+                  String combined = title + " " + fulltext;
                   if (combined.trim().isEmpty()) return;
                   // 唯一通知标识：同一条通知（同一应用内id名）多次回调/triggerScan反复扫不重复追加
                   // 用 package+id 区分通知实例；更新时id不变故不重复，不同支付通知id不同则分列
@@ -544,7 +550,7 @@ jobs:
                         + "\",\"nkey\":\"" + esc(nkey)
                         + "\",\"app\":\"" + esc(sbn.getPackageName())
                         + "\",\"title\":\"" + esc(title)
-                        + "\",\"text\":\"" + esc(text + " " + big)
+                        + "\",\"text\":\"" + esc(fulltext)
                         + "\",\"time\":" + System.currentTimeMillis() + "}";
                   synchronized (LOCK) {
                       File qf = queueFile();
