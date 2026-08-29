@@ -1307,6 +1307,7 @@ async function doImportScan(){
       raw = x.responseText;
     }
     impTx=JSON.parse(raw||'[]');
+    const rawArr = impTx; // 保存原生抓到的原始通知数组，用于诊断
     // 原生抓的是原始通知 {app,title,text,id,nkey}，需解析成记账格式(支持一条多笔)
     if(impTx.length && !impTx[0].amount){
       impTx = impTx.flatMap(n=>{
@@ -1324,7 +1325,13 @@ async function doImportScan(){
           return;
         }
       }
-      document.getElementById('importNotifyStatus').textContent='未发现支付通知。请保留银行/微信/支付宝支付通知，然后在通知栏确认后重新扫描。';
+      // 诊断：区分「完全没抓到」vs「抓到了但解析不出金额」
+      if(rawArr.length){
+        const sample = rawArr.slice(0,4).map(n=>(n.app||'')+'|'+(n.title||'')+'|'+(n.text||'')).join('\n');
+        document.getElementById('importNotifyStatus').textContent='未发现支付通知。原生抓到 '+rawArr.length+' 条但没解析出金额:\n'+sample;
+      } else {
+        document.getElementById('importNotifyStatus').textContent='未发现支付通知。请保留银行/微信/支付宝支付通知，然后在通知栏确认后重新扫描。';
+      }
       return;
     }
     document.getElementById('importNotifyStatus').style.display='none';
