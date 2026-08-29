@@ -1322,14 +1322,25 @@ async function doImportScan(){
       if(smsRaw){
         let smsArr=[];
         try{ smsArr=JSON.parse(smsRaw||'[]'); }catch(e){ smsArr=[]; }
-        const smsTx = smsArr.map(s=>{
+        // 默认只看最近30天的短信(避免一堆历史老短信刷屏), 按时间降序(最新在前)
+        const now=Date.now();
+        const cutoff=now-30*24*3600*1000;
+        const recent=smsArr.filter(s=>!s.date||s.date>=cutoff);
+        const smsTx = recent.map(s=>{
           // 短信正文即支付信息, 直接当原始通知解析
           const n={title:'' , text:s.body||'', app:s.address||''};
           const parsed = parseNotifMulti(n);
           return parsed.map(p=>Object.assign({}, p, {_rawId:'sms_'+s.date, _rawNkey:'sms_'+s.date, _src:'sms', _smsAddress:s.address, _smsDate:s.date}));
         }).flat();
-        // 用短信解析结果（优先级高，银行支付短信最可靠）
-        if(smsTx.length) impTx = smsTx;
+        // 用短信解析结果（优先级高，银行支付短信最可靠）；按时间降序 + 去重(同短信nkey只留一条)
+        if(smsTx.length){
+          const seen=new Set();
+          impTx = smsTx.filter(t=>{
+            if(t._rawNkey && seen.has(t._rawNkey)) return false;
+            if(t._rawNkey) seen.add(t._rawNkey);
+            return true;
+          }).sort((a,b)=>(b._smsDate||0)-(a._smsDate||0));
+        }
       }
     }
     if(!impTx.length){
@@ -1449,6 +1460,10 @@ function singleParse(seg,parentAcc){
   const amt=isFinite(f[0].amt)&&f[0].amt>0?f[0].amt:null;
   if(amt==null) return null;
   const s=seg;
+  // 排除"提醒类"非实际消费(余额不足/欠费/请及时缴费/应缴) —— 这些是催缴/提示, 不是已发生的支出
+  const remind=/余额不足|余额提醒|欠费|请及时|温馨提醒|温馨提示|现提醒|应缴|应还|至少|不足，|不足,.+/;
+  const donePay=/已支付|已扣款|已消费|支出成功|成功支付|已完成|已成功|已完成支付|扣款成功|支付成功|入账成功|已缴费|已充值|已转入|已退回|已收款|交易成功|消费成功|已支出/;
+  if(remind.test(s) && !donePay.test(s)) return null;
   let type='expense';
   const income=/收入|入账|收款|到账|存入|退回|退款|转入|红包|工资|收益/.test(s);
   const expense=/支出|消费|付款|支付|已支出|扣款|转出|缴费|还款/.test(s);
