@@ -1560,29 +1560,12 @@ function parseNotifMulti(n){
 async function readPendingQueue(){
   let raw='[]';
   try{
-    // 优先用 readImportedTx: 与手动扫描走完全相同的已验证可用路径。
-    // readPendingTx 是新建未绑定 service 实例读文件，存在抛异常风险，仅作兜底。
-    if(window.MinisBridge && typeof window.MinisBridge.readImportedTx==='function'){
+    if(window.MinisBridge && typeof window.MinisBridge.readPendingTx==='function'){
+      raw = window.MinisBridge.readPendingTx() || '[]';
+    } else if(window.MinisBridge && typeof window.MinisBridge.readImportedTx==='function'){
       if(typeof window.MinisBridge.triggerScan==='function') window.MinisBridge.triggerScan();
-      // 轮询读取，等原生写入完成(冷启动服务可能慢)，最多等3秒
-      let last='[]';
-      for(let tries=0;tries<12;tries++){
-        await new Promise(r=>setTimeout(r,250));
-        try{ last=window.MinisBridge.readImportedTx()||'[]'; }catch(e){ last='[]'; }
-        let arr=[]; try{ arr=JSON.parse(last); }catch(e){ arr=[]; }
-        if(Array.isArray(arr)&&arr.length) return arr;
-      }
-      raw=last;
-    } else if(window.MinisBridge && typeof window.MinisBridge.readPendingTx==='function'){
-      if(typeof window.MinisBridge.triggerScan==='function') window.MinisBridge.triggerScan();
-      let last='[]';
-      for(let tries=0;tries<12;tries++){
-        await new Promise(r=>setTimeout(r,250));
-        try{ last=window.MinisBridge.readPendingTx()||'[]'; }catch(e){ last='[]'; }
-        let arr=[]; try{ arr=JSON.parse(last); }catch(e){ arr=[]; }
-        if(Array.isArray(arr)&&arr.length) return arr;
-      }
-      raw=last;
+      await new Promise(r=>setTimeout(r,500));
+      raw = window.MinisBridge.readImportedTx() || '[]';
     } else {
       const x=new XMLHttpRequest();
       x.open('GET','./imported_tx.json',false);x.send();
@@ -1624,18 +1607,7 @@ let autoQueue=[], autoIdx=-1, pendingAutoCount=0, autoRunning=false;
 async function autoBookkeep(){
   if(autoRunning) return; autoRunning=true;
   try{
-    const q=await readPendingQueue();
-    if(!q.length){
-      // 队列空：提示是否已授权通知使用权（否则用户会困惑为何不自动）
-      if(window.MinisBridge && typeof window.MinisBridge.hasNotifAccess==='function'){
-        try{
-          if(!window.MinisBridge.hasNotifAccess()){
-            setTimeout(()=>ts('自动记账需要先授权「通知使用权」'),500);
-          }
-        }catch(e){}
-      }
-      return;
-    }
+  const q=await readPendingQueue();
   const tx=atx();
   let autoN=0, confirmItems=[], autoAck=[];
   const seen=new Set();
