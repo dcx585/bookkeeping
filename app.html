@@ -811,7 +811,13 @@ function applyInvDelta(name,delta,note){
   invSetAmount(base, (+inv[idx].amount||0)+delta, note||'转账');
 }
 function editTx(id){openTxModal(id)}
-function delTx(id){const old=atx().find(t=>t.id===id);if(old&&old.type==='transfer'){applyInvDelta(old.from,old.amount);applyInvDelta(old.to,-old.amount)}stx(atx().filter(t=>t.id!==id));ra()}
+async function delTx(id){
+  const old=atx().find(t=>t.id===id);
+  const desc=old?('¥'+(old.amount!=null?Number(old.amount).toFixed(2):'?')+' · '+(old.type==='income'?'收入':(old.type==='transfer'?'转账':'支出'))+(old.category?' · '+old.category:'')+(old.note?' · '+old.note:'')):'';
+  if(!await confirmBox('删除这笔流水？\n'+desc+'\n（删除后无法恢复）'))return;
+  if(old&&old.type==='transfer'){applyInvDelta(old.from,old.amount);applyInvDelta(old.to,-old.amount)}
+  stx(atx().filter(t=>t.id!==id));ra();ts('已删除');
+}
 function st2(type,btn){ct=type;document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const isT=type==='transfer';document.getElementById('txCatRow').style.display=isT?'none':'flex';document.getElementById('txTransferRow').style.display=isT?'flex':'none';document.getElementById('txFeeRow').style.display=isT?'flex':'none';document.getElementById('txSubmit').textContent=isT?'确认转账':type==='expense'?'确认支出':'确认收入';document.getElementById('txCatBtn').textContent='分类';document.getElementById('txCatBtn').classList.remove('selected')}
 
 // ── Picker ──
@@ -1394,6 +1400,11 @@ async function doImportScan(){
 const IMP_SKIP_KEY='minis_import_skip_v1';
 function delImpItem(i){
   const t=impTx[i]; if(!t) return;
+  delImpItemConfirm(i,t);
+}
+async function delImpItemConfirm(i,t){
+  const desc='¥'+(t.amount!=null?Number(t.amount).toFixed(2):'?')+' · '+(t.type==='income'?'收入':'支出')+(t.category?' · '+t.category:'')+(t.note?' · '+t.note:'');
+  if(!await confirmBox('忽略这条，不再显示？\n'+desc))return;
   const skip=JSON.parse(localStorage.getItem(IMP_SKIP_KEY)||'[]');
   if(t._rawNkey && !skip.includes(t._rawNkey)) skip.push(t._rawNkey);
   localStorage.setItem(IMP_SKIP_KEY,JSON.stringify(skip));
