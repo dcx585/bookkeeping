@@ -135,6 +135,7 @@ jobs:
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
                   targetCompatibility JavaVersion.VERSION_17
+                  encoding "UTF-8"
               }
           }
           EOF
@@ -571,6 +572,41 @@ jobs:
 
               private File queueFile() { return new File(getFilesDir(), "imported_tx.json"); }
 
+              /** 待处理条目的存活期：7 天后自动清除 */
+              private static final long TTL_MS = 7L * 24 * 3600 * 1000;
+
+              private String readAll(File f) throws Exception {
+                  if (f == null || !f.exists()) return "";
+                  byte[] b = new byte[(int) Math.min(f.length(), 4*1024*1024)];
+                  FileInputStream fi = new FileInputStream(f);
+                  int off = 0, r;
+                  while (off < b.length && (r = fi.read(b, off, b.length - off)) > 0) { off += r; }
+                  fi.close();
+                  return new String(b, 0, off, "UTF-8");
+              }
+              private void writeAll(File f, String s) throws Exception {
+                  FileOutputStream fo = new FileOutputStream(f);
+                  fo.write(s.getBytes("UTF-8"));
+                  fo.close();
+              }
+              private String hash(String s) {
+                  long h = 1125899906842597L;
+                  if (s == null) s = "";
+                  for (int i = 0; i < s.length(); i++) h = 31 * h + s.charAt(i);
+                  return Long.toHexString(h);
+              }
+              /** 是否为支付类通知：必须同时出现「金额」+「支付类关键词」，否则不入队 */
+              private boolean looksLikePayment(String title, String text) {
+                  String s = ((title == null ? "" : title) + " " + (text == null ? "" : text)).trim();
+                  if (s.length() < 4) return false;
+                  boolean hasAmt = java.util.regex.Pattern.compile(
+                      "([\u00a5\uffe5]\\s?\\d)|(\\d[\\d,]*(\\.\\d{1,2})?\\s*\u5143)").matcher(s).find();
+                  if (!hasAmt) return false;
+                  return java.util.regex.Pattern.compile(
+                      "\u652f\u4ed8|\u6d88\u8d39|\u652f\u51fa|\u6536\u5165|\u5230\u8d26|\u6263\u6b3e|\u9000\u6b3e|\u8f6c\u8d26|\u6536\u6b3e|\u5165\u8d26|\u4ea4\u6613|\u4f59\u989d|\u4ed8\u6b3e|\u94f6\u884c\u5361|\u50a8\u84c4\u5361|\u4fe1\u7528\u5361|\u82b1\u5457|\u8fd8\u6b3e"
+                  ).matcher(s).find();
+              }
+
               @Override
               public IBinder onBind(Intent intent) { return super.onBind(intent); }
 
@@ -610,9 +646,13 @@ jobs:
                   String fulltext = (textLines + " " + text + " " + big + " " + sub + " " + sum).trim();
                   String combined = title + " " + fulltext;
                   if (combined.trim().isEmpty()) return;
-                  // 唯一通知标识：同一条通知（同一应用内id名）多次回调/triggerScan反复扫不重复追加
-                  // 用 package+id 区分通知实例；更新时id不变故不重复，不同支付通知id不同则分列
-                  String nkey = sbn.getPackageName() + "|" + sbn.getId();
+                  // 只收「像支付」的通知：必须同时有金额+支付关键词，聊天/新闻/邮件一律不入队
+                  if (!looksLikePayment(title, fulltext)) return;
+                  // 唯一通知标识：package | id | 内容哈希
+                  // 【关键】不能用 package|id 当唯一键：微信/银行的支付通知常用固定 id，
+                  // 只按 package|id 去重会被 seen 集合永久拦死 →「第一条能记、之后全不来」。
+                  // 加入内容哈希后：同一条通知重复回调(内容相同)仍去重，而新的支付(内容不同)照常入队。
+                  String nkey = sbn.getPackageName() + "|" + sbn.getId() + "|" + hash(title + "\u0001" + fulltext);
                   if (queueHasNkey(nkey)) return;   // 队列里已有未处理的同一条 → 跳过
                   String id = java.util.UUID.randomUUID().toString().substring(0, 8)
                              + "_" + System.currentTimeMillis();
@@ -677,14 +717,25 @@ jobs:
                          int off=0, r; while(off<b.length && (r=fi.read(b,off,b.length-off))>0){off+=r;}
                          fi.close(); cur = new String(b,0,off,"UTF-8");
                       }
-                      if (cur.contains("\"nkey\":\"" + nkey.replace("\\","\\\\").replace("\"","\\\"") + "\"")) return; // 已记过
-                      String add = "{\"nkey\":\"" + esc(nkey) + "\"}";
-                      String next;
-                      if (cur.trim().isEmpty() || cur.trim().equals("[]")) {
-                          next = "[" + add + "]";
-                      } else {
-                          String base = cur.trim();
-                          if (base.endsWith("]")) base = base.substring(0, base.length()-1);
+                      long nowMs = System.currentTimeMillis();
+                      StringBuilder out = new StringBuilder("[");
+                      boolean first = true, exists = false;
+                      java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\{[^\\{\\}]*\\}").matcher(cur);
+                      while (m.find()) {
+                          String obj = m.group();
+                          java.util.regex.Matcher tm = java.util.regex.Pattern.compile("\"ts\":(\\d+)").matcher(obj);
+                          long t = tm.find() ? Long.parseLong(tm.group(1)) : nowMs;
+                          if (nowMs - t > TTL_MS) continue;   // 超过7天 → 自动清除
+                          if (obj.contains("\"nkey\":\"" + esc(nkey) + "\"")) exists = true;
+                          if (!first) out.append(",");
+                          first = false;
+                          out.append(obj);
+                      }
+                      out.append("]");
+                      String next = out.toString();
+                      if (!exists) {
+                          String add = "{\"nkey\":\"" + esc(nkey) + "\",\"ts\":" + nowMs + "}";
+                          String base = next.endsWith("]") ? next.substring(0, next.length()-1) : next;
                           if (base.endsWith(",")) base = base.substring(0, base.length()-1);
                           next = base + "," + add + "]";
                       }
@@ -693,30 +744,51 @@ jobs:
                       fo.close();
                   }
               }
+              private boolean nkeyInSeenLocked(String s, String nkey) {
+                  if (s == null || nkey == null) return false;
+                  long nowMs = System.currentTimeMillis();
+                  java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\{[^\\{\\}]*\\}").matcher(s);
+                  while (m.find()) {
+                      String obj = m.group();
+                      if (!obj.contains("\"nkey\":\"" + esc(nkey) + "\"")) continue;
+                      java.util.regex.Matcher tm = java.util.regex.Pattern.compile("\"ts\":(\\d+)").matcher(obj);
+                      if (tm.find()) { try { if (nowMs - Long.parseLong(tm.group(1)) > TTL_MS) return false; } catch (Exception ignored) {} }
+                      return true;
+                  }
+                  return false;
+              }
               private boolean nkeyInSeen(String nkey) throws Exception {
                   if (nkey == null) return false;
                   synchronized (LOCK) {
                       File sf = seenFile();
                       if (!sf.exists()) return false;
-                      byte[] b = new byte[(int) Math.min(sf.length(), 4*1024*1024)];
-                      FileInputStream fi = new FileInputStream(sf);
-                      int off=0, r; while(off<b.length && (r=fi.read(b,off,b.length-off))>0){off+=r;}
-                      fi.close();
-                      String s = new String(b,0,off,"UTF-8");
-                      return s.contains("\"nkey\":\"" + nkey.replace("\\","\\\\").replace("\"","\\\"") + "\"");
+                      return nkeyInSeenLocked(readAll(sf), nkey);
                   }
               }
 
-              /** 读取队列全文 */
+              /** 读取队列全文（顺带把超过7天的条目自动清除） */
               public String read() throws Exception {
                   synchronized (LOCK) {
                       File qf = queueFile();
                       if (!qf.exists()) return "[]";
-                      byte[] b = new byte[(int) Math.min(qf.length(), 4*1024*1024)];
-                      FileInputStream fi = new FileInputStream(qf);
-                      int off=0, r; while(off<b.length && (r=fi.read(b,off,b.length-off))>0){off+=r;}
-                      fi.close();
-                      return new String(b,0,off,"UTF-8");
+                      String json = readAll(qf);
+                      long nowMs = System.currentTimeMillis();
+                      StringBuilder out = new StringBuilder("[");
+                      boolean first = true, dropped = false;
+                      java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\{[^\\{\\}]*\\}").matcher(json);
+                      while (m.find()) {
+                          String obj = m.group();
+                          java.util.regex.Matcher tm = java.util.regex.Pattern.compile("\"time\":(\\d+)").matcher(obj);
+                          long t = tm.find() ? Long.parseLong(tm.group(1)) : nowMs;
+                          if (nowMs - t > TTL_MS) { dropped = true; continue; }   // 超过7天 → 自动清除
+                          if (!first) out.append(",");
+                          first = false;
+                          out.append(obj);
+                      }
+                      out.append("]");
+                      String res = out.toString();
+                      if (dropped) { try { writeAll(qf, res); } catch (Exception ignored) {} }
+                      return res;
                   }
               }
 

@@ -1294,6 +1294,54 @@ function parseNotif(n){
   else if(/银行卡|银行|招商|工商|建设|农业|中国银行/.test(s)) account='银行卡';
   return {amount:amt, type:type, category:category, account:account, note:s.slice(0,40)};
 }
+// ── 待处理框（原生通知队列的可视化层）──
+// 规则：只放纯支付信息；非支付的在扫描时就被删除，永不进框。
+// 框内条目保留 7 天：期间可手动清除；满 7 天由原生 read() 自动清除。
+const IMP_SKIP_KEY='minis_import_skip_v1';
+const IMP_DISMISS_KEY='minis_import_dismissed_v1';
+const IMP_TTL=7*24*3600*1000;
+// 已清除条目：留在框里灰显(可恢复)，7天后自动消失
+function loadDismissed(){
+  let arr=[]; try{ arr=JSON.parse(localStorage.getItem(IMP_DISMISS_KEY)||'[]'); }catch(e){ arr=[]; }
+  const cut=Date.now()-IMP_TTL;
+  arr=arr.filter(d=>d && d.ts>=cut);
+  try{ localStorage.setItem(IMP_DISMISS_KEY,JSON.stringify(arr)); }catch(e){}
+  return arr;
+}
+function saveDismissed(arr){ try{ localStorage.setItem(IMP_DISMISS_KEY,JSON.stringify(arr)); }catch(e){} }
+function impRowHtml(t,i){
+  return `<div style="display:flex;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:8px;font-size:14px">
+      <input type="checkbox" checked data-idx="${i}" style="width:18px;height:18px">
+      <span style="flex:1"><b>¥${Number(t.amount).toFixed(2)}</b> ${t.type==='income'?'收入':'支出'} · ${t.category}${t.account?' · '+t.account:''}<br><span style="font-size:12px;color:var(--text2)">${(t.note||'').replace(/</g,'&lt;')}</span></span>
+      <button onclick="delImpItem(${i})" style="background:none;border:none;color:#e55;font-size:18px;padding:0 6px;cursor:pointer" title="清除(7天内可恢复)">×</button>
+    </div>`;
+}
+function renderImpList(){
+  const list=document.getElementById('importNotifyList');
+  const dis=loadDismissed();
+  let html=impTx.map((t,i)=>impRowHtml(t,i)).join('');
+  if(dis.length){
+    html+=`<div style="margin-top:10px;font-size:12px;color:var(--text2)">已清除（保留7天，可恢复）</div>`
+      + dis.map((d,i)=>`<div style="display:flex;align-items:center;padding:6px 0;gap:8px;font-size:12px;color:var(--text2);opacity:.65">
+          <span style="flex:1;text-decoration:line-through">¥${Number(d.t.amount).toFixed(2)} · ${d.t.note||''}</span>
+          <button onclick="undelImpItem(${i})" style="background:none;border:none;color:var(--accent);font-size:12px;padding:0 4px;cursor:pointer">恢复</button>
+        </div>`).join('');
+  }
+  list.innerHTML=html;
+  const st=document.getElementById('importNotifyStatus');
+  const cb=document.getElementById('importConfirmBtn');
+  if(impTx.length){ st.style.display='none'; cb.style.display='block'; }
+  else{
+    st.style.display='block';
+    st.textContent=dis.length?'框中没有待入账的支付信息。':'未发现支付通知。请保留银行/微信/支付宝支付通知后重新扫描。';
+    cb.style.display='none';
+  }
+}
+function undelImpItem(i){
+  const dis=loadDismissed(); const d=dis[i]; if(!d) return;
+  dis.splice(i,1); saveDismissed(dis);
+  impTx.push(d.t); renderImpList(); ts('已恢复');
+}
 async function doImportScan(){
   document.getElementById('importNotifyStatus').textContent='扫描中...';
   document.getElementById('importConfirmBtn').style.display='none';
@@ -1317,10 +1365,19 @@ async function doImportScan(){
     const rawArr = impTx; // 保存原生抓到的原始通知数组，用于诊断
     // 原生抓的是原始通知 {app,title,text,id,nkey}，用parseNotifFull解析成完整记账格式(带finger,支持多笔)
     if(impTx.length && !impTx[0].amount){
-      impTx = impTx.flatMap(n=>{
+      // 原生抓的是原始通知 {app,title,text,id,nkey,time}
+      // 规则：① 解析不出支付的 → 不是支付信息，立即从原生队列删除，绝不留在框里
+      //       ② 超过 7 天的陈旧条目 → 同样删除（原生 read() 也会清，双保险）
+      const dead=[], keep=[];
+      const boxCut=Date.now()-IMP_TTL;
+      for(const n of impTx){
         const parsed = parseNotifFull(n);
-        return parsed.map(p=>Object.assign({}, p, {_rawId:n.id, _rawNkey:n.nkey, _src:'notice'}));
-      }).filter(Boolean);
+        const stale = (n.time && n.time < boxCut);
+        if(!parsed.length || stale){ if(n.id) dead.push(n.id); continue; }
+        parsed.forEach(p=>keep.push(Object.assign({}, p, {_rawId:n.id, _rawNkey:n.nkey, _src:'notice', _time:n.time})));
+      }
+      impTx=keep;
+      if(dead.length) ackPending(dead);   // 原生侧直接删除，不再占位
     }
     // 通知没解析出支付 → 尝试读短信收件箱(银行/支付短信多来自收件箱,最可靠)
     if(!impTx.length && window.MinisBridge && typeof window.MinisBridge.readSms==='function'){
@@ -1334,9 +1391,9 @@ async function doImportScan(){
           const latest=smsArr.map(s=>s.date).reduce((a,b)=>Math.max(a,b||0),0);
           smsDiagInfo='短信读到 '+smsArr.length+' 条, 最新:'+(latest?new Date(latest).toLocaleString():'?');
         } else { smsDiagInfo='短信读到 0 条(可能未授权READ_SMS或库为空)'; }
-        // 默认只看最近30天的短信(避免一堆历史老短信刷屏), 按时间降序(最新在前)
+        // 框只保留最近7天(与原生 TTL 一致)：更早的已过期待处理窗口
         const now=Date.now();
-        const cutoff=now-30*24*3600*1000;
+        const cutoff=now-IMP_TTL;
         const recent=smsArr.filter(s=>!s.date||s.date>=cutoff);
         const smsTx = recent.map(s=>{
           // 短信正文即支付信息, 用parseNotifFull解析(带finger,可判重不重复入账)
@@ -1375,6 +1432,8 @@ async function doImportScan(){
           return;
         }
       }
+      // 框中没有待入账项，但「已清除」区还有留存 → 正常渲染框
+      if(loadDismissed().length){ renderImpList(); return; }
       // 诊断：区分「完全没抓到」vs「抓到了但解析不出金额」
       let diag = smsDiagInfo ? ('\n['+smsDiagInfo+']') : '';
       if(rawArr.length){
@@ -1385,40 +1444,32 @@ async function doImportScan(){
       }
       return;
     }
-    document.getElementById('importNotifyStatus').style.display='none';
-    document.getElementById('importNotifyList').innerHTML=impTx.map((t,i)=>`<div style="display:flex;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:8px;font-size:14px">
-      <input type="checkbox" checked data-idx="${i}" style="width:18px;height:18px">
-      <span style="flex:1"><b>¥${t.amount.toFixed(2)}</b> ${t.type==='income'?'收入':'支出'} · ${t.category}${t.account?' · '+t.account:''}<br><span style="font-size:12px;color:var(--text2)">${t.note||''}</span></span>
-      <button onclick="delImpItem(${i})" style="background:none;border:none;color:#e55;font-size:18px;padding:0 6px;cursor:pointer" title="忽略(不再显示)">×</button>
-    </div>`).join('');
-    document.getElementById('importConfirmBtn').style.display='block';
+    renderImpList();
   }catch(e){
     document.getElementById('importNotifyStatus').textContent='扫描失败：'+e.message;
   }
 }
-// 忽略某条导入候选(从列表移除+记入忽略集,下次扫描不再出现)
-const IMP_SKIP_KEY='minis_import_skip_v1';
+// 清除某条：从原生队列真正删除(不再占位) + 进「已清除」区(7天内可恢复)
 function delImpItem(i){
   const t=impTx[i]; if(!t) return;
   delImpItemConfirm(i,t);
 }
 async function delImpItemConfirm(i,t){
   const desc='¥'+(t.amount!=null?Number(t.amount).toFixed(2):'?')+' · '+(t.type==='income'?'收入':'支出')+(t.category?' · '+t.category:'')+(t.note?' · '+t.note:'');
-  if(!await confirmBox('忽略这条，不再显示？\n'+desc))return;
-  const skip=JSON.parse(localStorage.getItem(IMP_SKIP_KEY)||'[]');
-  if(t._rawNkey && !skip.includes(t._rawNkey)) skip.push(t._rawNkey);
-  localStorage.setItem(IMP_SKIP_KEY,JSON.stringify(skip));
+  if(!await confirmBox('清除这条？7天内可恢复\n'+desc))return;
+  // ① 记入忽略集：防止同一条再次进入框
+  try{
+    const skip=JSON.parse(localStorage.getItem(IMP_SKIP_KEY)||'[]');
+    if(t._rawNkey && !skip.includes(t._rawNkey)) skip.push(t._rawNkey);
+    localStorage.setItem(IMP_SKIP_KEY,JSON.stringify(skip));
+  }catch(e){}
+  // ② 从原生队列真正删除（之前只加忽略集不删原生 → 所以删了还会冒出来）
+  if(t._rawId) ackPending([t._rawId]);
+  // ③ 移到「已清除」区，保留 7 天
+  const dis=loadDismissed(); dis.push({ts:Date.now(), t:t}); saveDismissed(dis);
   impTx.splice(i,1);
-  ts('已忽略，下次扫描不再显示');
-  if(!impTx.length){ document.getElementById('importNotifyList').innerHTML=''; document.getElementById('importConfirmBtn').style.display='none'; document.getElementById('importNotifyStatus').textContent='已全部忽略，无可导入项。'; }
-  else {
-    // 重新渲染
-    document.getElementById('importNotifyList').innerHTML=impTx.map((t,idx)=>`<div style="display:flex;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:8px;font-size:14px">
-      <input type="checkbox" checked data-idx="${idx}" style="width:18px;height:18px">
-      <span style="flex:1"><b>¥${t.amount.toFixed(2)}</b> ${t.type==='income'?'收入':'支出'} · ${t.category}${t.account?' · '+t.account:''}<br><span style="font-size:12px;color:var(--text2)">${t.note||''}</span></span>
-      <button onclick="delImpItem(${idx})" style="background:none;border:none;color:#e55;font-size:18px;padding:0 6px;cursor:pointer" title="忽略(不再显示)">×</button>
-    </div>`).join('');
-  }
+  renderImpList();
+  ts('已清除，7天内可恢复');
 }
 function doImportConfirm(){
   const checked=document.querySelectorAll('#importNotifyList input:checked');
