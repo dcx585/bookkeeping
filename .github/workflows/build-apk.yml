@@ -274,21 +274,9 @@ jobs:
                   @JavascriptInterface
                   public String readImportedTx() {
                       try {
-                          File f = new File(getFilesDir(), "imported_tx.json");
-                          if (f.exists()) {
-                              java.io.FileInputStream fi = new java.io.FileInputStream(f);
-                              byte[] b = new byte[(int) f.length()];
-                              int off = 0;
-                              while (off < b.length) {
-                                  int r = fi.read(b, off, b.length - off);
-                                  if (r < 0) break;
-                                  off += r;
-                              }
-                              fi.close();
-                              return new String(b, 0, off, "UTF-8");
-                          }
-                      } catch (Exception e) {}
-                      return "[]";
+                          // 走 svc.read()：与 readPendingTx 同源，且顺带把超过 7 天的条自动清除
+                          return new NotificationReaderService().read();
+                      } catch (Exception e) { return "[]"; }
                   }
                   @JavascriptInterface
                   public String readSms() {
@@ -404,6 +392,27 @@ jobs:
                               String[] list = new String[arr.length()];
                               for (int i=0;i<arr.length();i++) list[i]=arr.getString(i);
                               new NotificationReaderService().ack(list);
+                          } catch (Exception ignored) {}
+                      } });
+                  }
+                  // 通用状态持久化(应用内部私有目录)：给 JS 存「已处理集合」「滞留箱」等，
+                  // 清缓存/重装不丢，也不导出到下载目录
+                  @JavascriptInterface
+                  public String readState(String name) {
+                      try {
+                          File f = new File(getFilesDir(), "state_" + (name == null ? "x" : name) + ".json");
+                          if (!f.exists()) return "";
+                          return new NotificationReaderService().readFileText(f);
+                      } catch (Exception e) { return ""; }
+                  }
+                  @JavascriptInterface
+                  public void writeState(String name, String content) {
+                      final String nm = (name == null ? "x" : name);
+                      final String ct = content == null ? "" : content;
+                      mainHandler.post(new Runnable() { public void run() {
+                          try {
+                              new NotificationReaderService().writeFileText(
+                                  new File(getFilesDir(), "state_" + nm + ".json"), ct);
                           } catch (Exception ignored) {}
                       } });
                   }
@@ -791,6 +800,10 @@ jobs:
                       return res;
                   }
               }
+
+              /** 通用内部文件读写（供「已处理集合/滞留箱」等状态持久化用，不走下载目录） */
+              public String readFileText(File f) throws Exception { return readAll(f); }
+              public void writeFileText(File f, String s) throws Exception { writeAll(f, s); }
 
               /** 消费确认：删除指定 id 的条目 */
               public void ack(String[] ids) throws Exception {
