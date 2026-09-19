@@ -382,10 +382,12 @@ input[type=checkbox]{accent-color:var(--accent)}
 <div class="modal" id="importNotifyModal">
   <div class="sheet"><h3>支付待处理框</h3>
     <div style="font-size:11px;color:var(--text2);text-align:center;margin:-6px 0 8px">只放纯支付信息 · 已记账的自动删 · 清除的留 7 天可恢复</div>
+    <div id="impStatusLine" style="font-size:11px;color:var(--text2);text-align:center;margin-bottom:8px"></div>
     <div id="importNotifyStatus" style="text-align:center;color:var(--text2);padding:16px 0;font-size:14px">点击扫描，从通知/短信收取支付信息</div>
     <div id="importNotifyList" style="max-height:44vh;overflow-y:auto;margin-bottom:10px"></div>
     <button class="submit" onclick="doImportScan()">🔍 扫描（通知+短信）</button>
     <button class="submit" id="importConfirmBtn" onclick="doImportConfirm()" style="display:none">✓ 确认入账</button>
+    <button class="cancel-btn" onclick="showImpDiag()" style="margin-top:4px;font-size:12px;opacity:.7">诊断（看原始数据）</button>
     <button class="cancel-btn" onclick="clearHandled();ts('已清空「已处理」记录，下次扫描会重新判定')" style="margin-top:4px;font-size:12px;opacity:.7">清空已处理记录</button>
     <button class="cancel-btn" onclick="closeImportNotify()" style="margin-top:4px">关闭</button>
   </div>
@@ -1257,12 +1259,51 @@ async function importFromClipboard(){
 let impTx=[];
 function openImportNotify(){
   impTx=[];document.getElementById('importNotifyStatus').style.display='block';
-  document.getElementById('importNotifyStatus').textContent='点击「扫描」从通知和短信里收取支付信息';
+  document.getElementById('importNotifyStatus').textContent='扫描中…';
   document.getElementById('importNotifyList').innerHTML='';
   document.getElementById('importConfirmBtn').style.display='none';
   document.getElementById('importNotifyModal').classList.add('show');
+  refreshImpStatus();
+  doImportScan();   // 打开即扫描：避免看到上次遗留的旧结果，误判成"又坏了"
 }
 function closeImportNotify(){document.getElementById('importNotifyModal').classList.remove('show')}
+
+// ── 诊断：把"为什么没抓到"摊开给用户看 ──
+let __impRaw={notif:[],sms:[],nNotif:0,nSms:0,nRecent:0,nPay:0,lastScan:''};
+function impStatusText(){
+  const parts=[];
+  try{
+    if(window.MinisBridge && typeof window.MinisBridge.notifStatus==='function'){
+      const o=JSON.parse(window.MinisBridge.notifStatus()||'{}');
+      parts.push('通知读取 '+(o.granted?'已授权':'未授权'));
+      parts.push('服务 '+(o.connected?'已连接':'未连接'));
+      parts.push('队列 '+o.queue+'条');
+      // 已授权但服务没连上 → 主动请求重连（"用一次就死"多因被系统解绑）
+      if(o.granted && !o.connected && typeof window.MinisBridge.requestRebind==='function'){
+        try{ window.MinisBridge.requestRebind(); }catch(e){}
+      }
+    }
+  }catch(e){ parts.push('状态读取失败'); }
+  parts.push('短信读到 '+__impRaw.nSms+'条');
+  if(__impRaw.lastScan) parts.push('上次 '+__impRaw.lastScan);
+  return parts.join(' · ');
+}
+function refreshImpStatus(){
+  const el=document.getElementById('impStatusLine');
+  if(el) el.textContent=impStatusText();
+}
+function showImpDiag(){
+  const st=document.getElementById('importNotifyStatus');
+  st.style.display='block';
+  let s=impStatusText();
+  s+='\n\n【通知队列 '+__impRaw.nNotif+' 条】';
+  s+= __impRaw.notif.length ? ('\n'+__impRaw.notif.join('\n'))
+                            : '\n(空 —— 通知服务没抓到。看上面"服务/授权"状态)';
+  s+='\n\n【短信共 '+__impRaw.nSms+' 条，近7天 '+__impRaw.nRecent+' 条，原文样本】';
+  s+= __impRaw.sms.length ? ('\n'+__impRaw.sms.join('\n'))
+                          : '\n(空 —— 未授权读取短信，或短信库为空)';
+  st.textContent=s;
+}
 // 从原始支付通知文本解析出记账项（金额/收支/分类/账户）
 function parseNotif(n){
   const s=(n.title||'')+' '+(n.text||'')+(n.app||'');
@@ -1370,9 +1411,23 @@ function entryKey(t){ return (t&&t._boxKey)||''; }
 function impRowHtml(t,i){
   const src=t._src==='sms'?'短信':'通知';
   const when=t._smsDate?new Date(t._smsDate):(t._time?new Date(t._time):null);
+  const meta=`${src}${when?' · '+when.toLocaleString():''}`;
+  if(t._manual){
+    // 像支付但解析不出金额 → 给输入框手填，而不是丢掉
+    return `<div style="display:flex;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:8px;font-size:14px">
+      <input type="checkbox" checked data-idx="${i}" style="width:18px;height:18px">
+      <span style="flex:1">
+        <input type="number" step="0.01" inputmode="decimal" placeholder="金额" data-manual="${i}"
+          style="width:88px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text);font-size:14px">
+        <span style="font-size:12px;color:var(--text2)"> ✎ 没解析出金额，请手填</span><br>
+        <span style="font-size:12px;color:var(--text2)">${meta} · ${(t.note||'').replace(/</g,'&lt;')}</span>
+      </span>
+      <button onclick="delImpItem(${i})" style="background:none;border:none;color:#e55;font-size:18px;padding:0 6px;cursor:pointer" title="清除(7天内可恢复)">×</button>
+    </div>`;
+  }
   return `<div style="display:flex;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:8px;font-size:14px">
       <input type="checkbox" checked data-idx="${i}" style="width:18px;height:18px">
-      <span style="flex:1"><b>¥${Number(t.amount).toFixed(2)}</b> ${t.type==='income'?'收入':'支出'} · ${t.category}${t.account?' · '+t.account:''}<br><span style="font-size:12px;color:var(--text2)">${src}${when?' · '+when.toLocaleString():''} · ${(t.note||'').replace(/</g,'&lt;')}</span></span>
+      <span style="flex:1"><b>¥${Number(t.amount).toFixed(2)}</b> ${t.type==='income'?'收入':'支出'} · ${t.category}${t.account?' · '+t.account:''}<br><span style="font-size:12px;color:var(--text2)">${meta} · ${(t.note||'').replace(/</g,'&lt;')}</span></span>
       <button onclick="delImpItem(${i})" style="background:none;border:none;color:#e55;font-size:18px;padding:0 6px;cursor:pointer" title="清除(7天内可恢复)">×</button>
     </div>`;
 }
@@ -1412,7 +1467,7 @@ async function doImportScan(){
     const now=Date.now(), cut=now-IMP_TTL;
     const handled=loadHandled();
     const killNotif=[], pool=[];   // pool: 全部解析出的支付条目(含已记账, 用于配对去重)
-    let nNotif=0, nSms=0, nDrop=0, nDup=0;
+    let nNotif=0, nSms=0, nDrop=0, nDup=0, nManual=0, nRecentSms=0, nPaySms=0, smsRecent=[];
 
     // ── ① 原生通知队列 ──
     let notifRaw=[];
@@ -1435,7 +1490,21 @@ async function doImportScan(){
       // 超出 7 天 / 已处理过 → 从源删除
       if((n.time && n.time<cut) || handled.has(key)){ if(n.id) killNotif.push(n.id); nDrop++; continue; }
       const parsed=parseNotifFull(n);
-      if(!parsed.length){ if(n.id) killNotif.push(n.id); markHandled([key]); nDrop++; continue; } // 非支付 → 删+标记
+      if(!parsed.length){
+        // 先用「纯支付」判定分两种：
+        if(!looksLikePaymentText((n.title||'')+' '+(n.text||''))){
+          // ① 确认不是支付信息 → 从源删除（不写永久集合：万一判定规则误伤，下次扫描还能重判）
+          if(n.id) killNotif.push(n.id);
+          nDrop++; continue;
+        }
+        // ② 像支付但解析不出金额 =【解析局限】，不能当非支付删掉。
+        //    静默删除会让用户以为"又漏了" → 改为进框，由用户手填金额。
+        pool.push({amount:null,_manual:true,type:'expense',category:'其他',account:'',
+                   note:((n.title||'')+' '+(n.text||'')).trim().slice(0,80),
+                   _rawId:n.id,_rawNkey:n.nkey,_src:'notice',_time:n.time,_boxKey:key,_recorded:false});
+        nManual++;
+        continue;
+      }
       parsed.forEach(p=>{
         const e=Object.assign({},p,{_rawId:n.id,_rawNkey:n.nkey,_src:'notice',_time:n.time,_boxKey:key});
         e._recorded=!!(e.finger && txFingerExists(e.finger, e._time));   // 已记账标记（配对去重要用）
@@ -1449,13 +1518,23 @@ async function doImportScan(){
       try{ smsArr=JSON.parse(window.MinisBridge.readSms()||'[]'); }catch(e){ smsArr=[]; }
       if(!Array.isArray(smsArr)) smsArr=[];
       nSms=smsArr.length;
-      for(const s of smsArr){
+      smsRecent=smsArr.filter(s=>s.date && s.date>=cut);
+      nRecentSms=smsRecent.length;
+      nPaySms=smsRecent.filter(s=>looksLikePaymentText(s.body||'')).length;
+      for(const s of smsRecent){
         const key=smsKey(s);
         if(handled.has(key)) continue;
         if(!s.date || s.date<cut) continue;                       // 超窗：不处理也不标记
-        if(!looksLikePaymentText(s.body||'')){ markHandled([key]); nDrop++; continue; } // 非支付 → 标记删除
+        if(!looksLikePaymentText(s.body||'')){ nDrop++; continue; } // 非支付 → 不进框（不写永久集合，规则改动后可重判）
         const parsed=parseNotifFull({title:'',text:s.body||'',app:s.address||'',time:s.date});
-        if(!parsed.length){ markHandled([key]); nDrop++; continue; }
+        if(!parsed.length){
+          // 看着像支付却解析不出金额 → 进框手填，绝不静默丢弃
+          pool.push({amount:null,_manual:true,type:'expense',category:'其他',account:'',
+                     note:(s.body||'').slice(0,80),
+                     _rawId:'',_rawNkey:key,_src:'sms',_smsAddress:s.address,_smsDate:s.date,_boxKey:key,_recorded:false});
+          nManual++;
+          continue;
+        }
         parsed.forEach(p=>{
           const e=Object.assign({},p,{_rawId:'',_rawNkey:key,_src:'sms',_smsAddress:s.address,_smsDate:s.date,_boxKey:key});
           e._recorded=!!(e.finger && txFingerExists(e.finger, e._smsDate));
@@ -1472,6 +1551,7 @@ async function doImportScan(){
     const seenK=new Set(), seenPay={};
     const merged=pool.filter(e=>{
       const k=entryKey(e)||e.finger; if(!k||seenK.has(k)) return false;
+      if(e._manual){ seenK.add(k); return true; }   // 手填项金额未知，不参与配对去重
       const t=e._smsDate||e._time||0;
       const day=t?new Date(t).toISOString().slice(0,10):'?';
       const pk=day+'|'+(e.type||'expense')+'|'+Number(e.amount).toFixed(2);
@@ -1494,6 +1574,15 @@ async function doImportScan(){
     nDup=merged.filter(e=>e._recorded).length;
     impTx=merged.filter(e=>!e._recorded).map(e=>{ const c=Object.assign({},e); delete c._recorded; return c; });
     impTx.sort((a,b)=>(b._smsDate||b._time||0)-(a._smsDate||a._time||0));
+
+    // ── ⑥ 诊断留档（供「诊断」按钮展示，一眼看出为什么没抓到）──
+    __impRaw={
+      nNotif:nNotif, nSms:nSms, nRecent:nRecentSms, nPay:nPaySms,
+      lastScan:new Date().toTimeString().slice(0,8),
+      notif:notifRaw.slice(0,3).map(n=>(n.app||'')+'／'+(n.title||'')+'／'+(n.text||'').slice(0,60)),
+      sms:smsRecent.slice(0,3).map(s=>(s.address||'')+' · '+new Date(s.date||0).toLocaleString()+' · '+(s.body||'').slice(0,60))
+    };
+    refreshImpStatus();
 
     // ── ④ 从源里真正删除 ──
     if(killNotif.length) ackPending(killNotif);
@@ -1552,18 +1641,37 @@ function doImportConfirm(){
   if(!checked.length)return ts('请至少选择一条');
   const tx=atx();
   const ackIds=[], handledKeys=[];
+  let skipped=0, added=0;
   checked.forEach(cb=>{
-    const t=impTx[parseInt(cb.dataset.idx)];
+    const i=parseInt(cb.dataset.idx,10);
+    const t=impTx[i];
     if(!t) return;
+    let amt=t.amount;
+    if(t._manual){
+      // 手填金额：没填或非法 → 跳过（不写入脏数据）
+      const inp=document.querySelector('#importNotifyList input[data-manual="'+i+'"]');
+      amt=inp?parseFloat(inp.value):NaN;
+      if(isNaN(amt)||amt<=0){ skipped++; return; }
+    }
+    if(!(amt>0)){ skipped++; return; }
     // 记账日期：短信按短信日期，通知按通知时间，都没有才用今天
     const d=new Date(t._smsDate||t._time||Date.now());
-    const ds=isNaN(d.getTime())?new Date().toISOString().slice(0,10):d.toISOString().slice(0,10);
-    const hh=isNaN(d.getTime())?'12:00:00':d.toTimeString().slice(0,8);
-    tx.push({id:uid(),time:ds+'T'+hh,type:t.type,amount:t.amount,note:t.note||'',account:t.account||'',category:t.category||'其他',finger:t.finger});
+    const ok=!isNaN(d.getTime());
+    const ds=ok?d.toISOString().slice(0,10):new Date().toISOString().slice(0,10);
+    const hh=ok?d.toTimeString().slice(0,8):'12:00:00';
+    tx.push({id:uid(),time:ds+'T'+hh,type:t.type,amount:amt,note:t.note||'',
+             account:t.account||'',category:t.category||'其他',
+             finger:t.finger||payFingerprint(t.note||'',t.account||'',amt,d.getTime())});
     if(t._src==='notice'&&t._rawId) ackIds.push(t._rawId);
     const k=entryKey(t); if(k) handledKeys.push(k);
+    added++;
   });
-  stx(tx);closeImportNotify();ra();ts('已入账 '+checked.length+' 条');
+  if(!added){
+    if(skipped) return ts('手填金额后再确认（'+skipped+' 条缺金额）');
+    return ts('没有可入账的条目');
+  }
+  stx(tx);closeImportNotify();ra();
+  ts('已入账 '+added+' 条'+(skipped?('，'+skipped+' 条因缺金额跳过'):''));
   // 关键：记完就从源里删掉 + 持久标记 → 以后不再出现（不靠 localStorage，清缓存也不丢）
   if(ackIds.length) ackPending(ackIds);
   if(handledKeys.length) markHandled(handledKeys);
