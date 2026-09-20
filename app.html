@@ -1367,6 +1367,7 @@ function showImpDiag(){
   s+='被解绑：'+Number(ev.disconnectCount||0)+' 次，最近 '+(ev.lastDisconnectTs?agoText(ev.lastDisconnectTs):'无')+'\n';
   s+='扫描通知栏：'+Number(ev.scanCount||0)+' 次，最近一次看到 '+Number(ev.lastScanActive||0)+' 条通知';
   s+= (ev.lastScanNull==='1') ? '  ⚠返回null=服务未被系统绑定\n' : '\n';
+  if(ev.lastTriggerErr) s+='触发扫描报错：'+ev.lastTriggerErr+'\n';
   s+='\n'+impStatusText();
   s+='\n\n【本轮队列 '+__impRaw.nNotif+' 条】';
   s+= __impRaw.notif.length ? ('\n'+__impRaw.notif.join('\n'))
