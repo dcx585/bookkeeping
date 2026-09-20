@@ -1329,16 +1329,23 @@ function refreshImpStatus(){
   }catch(e){}
   const ev=readEvidence();
   let need=false, msg='';
+  const connCnt=Number(ev.connectCount||0);
   if(granted===false){
     need=true;
     msg='「通知使用权」没开 → 收不到任何支付通知（短信库里没有的5G消息也收不到）。';
-  } else if(ev.lastScanNull==='1'){
-    // 硬证据：getActiveNotifications() 返回 null = 服务确实没被系统绑定
+  } else if(connCnt===0){
+    // 【最常见】权限给了，但系统从未绑定服务。
+    // 原因1：清单 exported=false（v1.18前）→ 系统绑不上，本版已修
+    // 原因2：装/更新后 Android 不会自动重新绑定 → 必须把通知使用权【关掉再打开】
     need=true;
-    msg='系统没有绑定通知服务（扫描通知栏返回空）——新通知进不来。点「重连通知服务」；无效就去设置里把「记账」的通知使用权关掉再打开。';
+    msg='系统从未绑定过通知服务（权限虽已开，但没连上）——这一条搞定就能收通知：\n'
+       +'打开下面的「通知设置」→ 把「记账」的开关【关掉】→ 等 2 秒 →【再打开】，然后回到本页点「重连通知服务」。';
+  } else if(ev.lastScanNull==='1'){
+    need=true;
+    msg='系统把通知服务解绑了（扫描通知栏返回 null）——点「重连通知服务」；无效就把通知使用权关掉再打开。';
   } else if(granted && !ev.lastNotifTs){
     need=true;
-    msg='还没收到过任何通知。若你明明有支付通知却一直为空，多半是系统在后台把服务解绑了 —— 建议在系统设置里给「记账」打开「后台高耗电」「允许自启动」。';
+    msg='服务已连上但还没收到过任何通知。若明明有通知却一直为空，请给「记账」打开「后台高耗电」「允许自启动」。';
   }
   hint.style.display=need?'block':'none';
   if(need){
@@ -1721,8 +1728,9 @@ async function doImportScan(){
           granted=JSON.parse(window.MinisBridge.notifStatus()||'{}').granted;
         }
         if(granted===false) why='\n⚠ 通知使用权未开 → 支付通知收不到（5G消息类银行通知也不在短信库里）。';
+        else if(Number(ev.connectCount||0)===0) why='\n⚠ 系统从未绑定过通知服务（权限虽已开却没连上）→ 打开「通知设置」，把「记账」的开关【关掉再打开】，回来点「重连通知服务」。';
         else if(ev.lastScanNull==='1') why='\n⚠ 服务未被系统绑定（扫描通知栏返回空）→ 点上面「重连通知服务」。';
-        else if(!ev.lastNotifTs) why='\n⚠ 服务从未收到过通知。若确实有支付通知，请在系统设置给「记账」开「后台高耗电/自启动」。';
+        else if(!ev.lastNotifTs) why='\n⚠ 服务已连上但从未收到通知。若确实有支付通知，请在系统设置给「记账」开「后台高耗电/自启动」。';
       }catch(e){}
       st.textContent=window.__impDiag+why+'\n没有可入账的支付信息。保留支付通知/短信后重新扫描。';
       document.getElementById('importNotifyList').innerHTML='';
