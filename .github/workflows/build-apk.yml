@@ -275,7 +275,7 @@ jobs:
                   public String readImportedTx() {
                       try {
                           // 走 svc.read()：与 readPendingTx 同源，且顺带把超过 7 天的条自动清除
-                          return new NotificationReaderService().read();
+                          return NotificationReaderService.queueRead(getFilesDir());
                       } catch (Exception e) { return "[]"; }
                   }
                   @JavascriptInterface
@@ -341,7 +341,7 @@ jobs:
                   @JavascriptInterface
                   public String notifEvidence() {
                       // 服务运行证据（key=value 文本）：收到多少通知、连过几次、扫描结果
-                      try { return new NotificationReaderService().evidence(); } catch (Exception e) { return ""; }
+                      try { return NotificationReaderService.evidenceRead(getFilesDir()); } catch (Exception e) { return ""; }
                   }
                   @JavascriptInterface
                   public String notifStatus() {
@@ -351,7 +351,7 @@ jobs:
                       try { granted = NotificationReaderService.isEnabled(MainActivity.this); } catch (Exception e) {}
                       try { conn = NotificationReaderService.isConnected(); } catch (Exception e) {}
                       try {
-                          String q = new NotificationReaderService().read();
+                          String q = NotificationReaderService.queueRead(getFilesDir());
                           if (q != null && q.length() > 4) {
                               qn = q.split("\"nkey\"").length - 1;
                           }
@@ -377,7 +377,10 @@ jobs:
                               Intent i = new Intent(NotificationReaderService.ACTION_SEND);
                               i.setClass(MainActivity.this, NotificationReaderService.class);
                               startService(i);
-                          } catch (Exception ignored) {}
+                          } catch (Exception e) {
+                              // 不再静默：写进证据，否则"扫描没反应"永远查不出来
+                              try { NotificationReaderService.evSet(getFilesDir(), "lastTriggerErr", String.valueOf(e)); } catch (Exception ignored) {}
+                          }
                       } });
                   }
                   @JavascriptInterface
@@ -426,8 +429,7 @@ jobs:
                   @JavascriptInterface
                   public String readPendingTx() {
                       try {
-                          NotificationReaderService svc = new NotificationReaderService();
-                          return svc.read();
+                          return NotificationReaderService.queueRead(getFilesDir());
                       } catch (Exception e) { return "[]"; }
                   }
                   @JavascriptInterface
@@ -438,7 +440,7 @@ jobs:
                               org.json.JSONArray arr = new org.json.JSONArray(ids);
                               String[] list = new String[arr.length()];
                               for (int i=0;i<arr.length();i++) list[i]=arr.getString(i);
-                              new NotificationReaderService().ack(list);
+                              NotificationReaderService.queueAck(getFilesDir(), list);
                           } catch (Exception ignored) {}
                       } });
                   }
@@ -449,7 +451,7 @@ jobs:
                       try {
                           File f = new File(getFilesDir(), "state_" + (name == null ? "x" : name) + ".json");
                           if (!f.exists()) return "";
-                          return new NotificationReaderService().readFileText(f);
+                          return NotificationReaderService.readText(f);
                       } catch (Exception e) { return ""; }
                   }
                   @JavascriptInterface
@@ -458,7 +460,7 @@ jobs:
                       final String ct = content == null ? "" : content;
                       mainHandler.post(new Runnable() { public void run() {
                           try {
-                              new NotificationReaderService().writeFileText(
+                              NotificationReaderService.writeText(
                                   new File(getFilesDir(), "state_" + nm + ".json"), ct);
                           } catch (Exception ignored) {}
                       } });
@@ -595,12 +597,8 @@ jobs:
           cat > app/src/main/java/com/minis/bookkeeping/NotificationReaderService.java << 'JAVA'
           package com.minis.bookkeeping;
           import android.app.Notification;
-          import android.app.NotificationChannel;
-          import android.app.NotificationManager;
-          import android.app.Service;
           import android.content.Context;
           import android.content.Intent;
-          import android.os.Build;
           import android.os.IBinder;
           import android.provider.Settings;
           import android.service.notification.NotificationListenerService;
@@ -609,118 +607,269 @@ jobs:
           import java.io.File;
           import java.io.FileOutputStream;
           import java.io.FileInputStream;
-          import java.io.FileWriter;
-          import java.io.RandomAccessFile;
+          import java.util.regex.Matcher;
+          import java.util.regex.Pattern;
 
           /**
-           * 档次1：通知到达即实时入队（追加到 pending_tx.json 消费队列）。
-           * 解析/判重/入账由网页端(JS)统一负责；此处只负责可靠采集 + 消费确认。
+           * 通知采集服务。
+           *
+           * ★ 修掉一条致命 bug（v1.15~v1.17 一直存在）：
+           *   网页端桥接原先写的是 `new NotificationReaderService().read()`。
+           *   但 Service 的文件 API（getFilesDir）依赖系统绑定时注入的 base Context；
+           *   `new` 出来的实例 mBase == null → getFilesDir() 直接抛 NullPointerException
+           *   → 被 catch 吞掉 → 网页端永远读到 "[]"、诊断证据永远全 0。
+           *   表现就是：服务其实在正常收通知、正常写文件，但【读的人一开口就崩】。
+           *
+           *   修法：所有文件读写抽成 static + 显式 dir 参数。
+           *     · 服务自身（已被绑定，有 Context）→ 传 getFilesDir()
+           *     · 网页桥接（在 Activity 内，有 Context）→ 传 Activity 的 getFilesDir()
+           *   两边都不再 new 服务实例。
            */
           public class NotificationReaderService extends NotificationListenerService {
               public static final String ACTION_SEND = "com.minis.bookkeeping.SEND_PAYLOAD";
               private static final String TAG = "NotifReader";
               private static final Object LOCK = new Object();
 
-              public static boolean isEnabled(Context ctx) {
-                  String flat = Settings.Secure.getString(ctx.getContentResolver(), "enabled_notification_listeners");
-                  return flat != null && flat.contains(ctx.getPackageName());
-              }
-
-              private File queueFile() { return new File(getFilesDir(), "imported_tx.json"); }
-
               /** 待处理条目的存活期：7 天后自动清除 */
-              private static final long TTL_MS = 7L * 24 * 3600 * 1000;
+              public static final long TTL_MS = 7L * 24 * 3600 * 1000;
 
-              // ── 运行证据 ──────────────────────────────────────────
-              // 目的：用【客观记录】代替猜测。以前我只能靠静态布尔猜"服务有没有连上"，
-              // 结果进程一重启就误报。现在服务把关键事件写进文件，重启也不丢：
-              //   notifSeen / notifPay / notifNonPay / lastNotifTs / lastNotifApp
-              //   connectCount / lastConnectTs / disconnectCount / lastDisconnectTs
-              //   scanCount / lastScanTs / lastScanActive / lastScanNull
-              private File evFile() { return new File(getFilesDir(), "notif_evidence.json"); }
-              private java.util.HashMap<String, String> evRead() {
-                  java.util.HashMap<String, String> m = new java.util.HashMap<>();
+              // ── 基础文件读写（静态、不依赖 Context）──────────────────
+              public static String readText(File f) {
                   try {
-                      String s = readAll(evFile());
-                      for (String line : s.split("\n")) {
-                          int i = line.indexOf('=');
-                          if (i > 0) m.put(line.substring(0, i), line.substring(i + 1));
-                      }
-                  } catch (Exception e) {}
-                  return m;
+                      if (f == null || !f.exists()) return "";
+                      byte[] b = new byte[(int) Math.min(f.length(), 4L * 1024 * 1024)];
+                      FileInputStream fi = new FileInputStream(f);
+                      int off = 0, r;
+                      while (off < b.length && (r = fi.read(b, off, b.length - off)) > 0) { off += r; }
+                      fi.close();
+                      return new String(b, 0, off, "UTF-8");
+                  } catch (Exception e) { return ""; }
               }
-              private void evWrite(java.util.HashMap<String, String> m) {
+              public static void writeText(File f, String s) {
                   try {
-                      StringBuilder sb = new StringBuilder();
-                      for (java.util.Map.Entry<String, String> e : m.entrySet())
-                          sb.append(e.getKey()).append('=').append(e.getValue()).append('\n');
-                      writeAll(evFile(), sb.toString());
+                      FileOutputStream fo = new FileOutputStream(f);
+                      fo.write((s == null ? "" : s).getBytes("UTF-8"));
+                      fo.close();
                   } catch (Exception e) {}
               }
-              private void evSet(String k, String v) {
-                  synchronized (LOCK) { java.util.HashMap<String, String> m = evRead(); m.put(k, v); evWrite(m); }
-              }
-              private void evInc(String k, String tsKey) {
+              private static File qfOf(File dir) { return new File(dir, "imported_tx.json"); }
+              private static File evOf(File dir) { return new File(dir, "notif_evidence.json"); }
+              private static File seenOf(File dir) { return new File(dir, "seen_nkeys.json"); }
+
+              // ── 队列：读（顺带清理超期）/ 追加 / 消费确认 ──────────────
+              public static String queueRead(File dir) {
                   synchronized (LOCK) {
-                      java.util.HashMap<String, String> m = evRead();
+                      File qf = qfOf(dir);
+                      if (!qf.exists()) return "[]";
+                      String json = readText(qf);
+                      long now = System.currentTimeMillis();
+                      StringBuilder out = new StringBuilder("[");
+                      boolean first = true, dropped = false;
+                      Matcher m = Pattern.compile("\\{[^\\{\\}]*\\}").matcher(json);
+                      while (m.find()) {
+                          String obj = m.group();
+                          Matcher tm = Pattern.compile("\"time\":(\\d+)").matcher(obj);
+                          long t = tm.find() ? Long.parseLong(tm.group(1)) : now;
+                          if (now - t > TTL_MS) { dropped = true; continue; }   // 超过7天 → 清除
+                          if (!first) out.append(",");
+                          first = false;
+                          out.append(obj);
+                      }
+                      out.append("]");
+                      String res = out.toString();
+                      if (dropped) writeText(qf, res);
+                      return res;
+                  }
+              }
+              private static void queueAppend(File dir, String entry) {
+                  synchronized (LOCK) {
+                      File qf = qfOf(dir);
+                      String pending = readText(qf).trim();
+                      String next;
+                      if (pending.isEmpty() || pending.equals("[]")) {
+                          next = "[" + entry + "]";
+                      } else {
+                          String base = pending;
+                          if (base.endsWith("]")) base = base.substring(0, base.length() - 1);
+                          if (base.endsWith(",")) base = base.substring(0, base.length() - 1);
+                          next = base + "," + entry + "]";
+                      }
+                      writeText(qf, next);
+                  }
+              }
+              private static boolean queueHasNkey(File dir, String nkey) {
+                  if (nkey == null) return false;
+                  synchronized (LOCK) {
+                      if (nkeyInSeen(dir, nkey)) return true;              // 已处理过 → 不再追加
+                      String q = queueRead(dir);
+                      return q.contains("\"nkey\":\"" + esc(nkey) + "\"");
+                  }
+              }
+              /** 消费确认：删除指定 id，并把它们的 nkey 记入「已处理」，防止重复入队 */
+              public static void queueAck(File dir, String[] ids) {
+                  if (ids == null || ids.length == 0) return;
+                  java.util.Set<String> set = new java.util.HashSet<>();
+                  for (String i : ids) set.add(i);
+                  synchronized (LOCK) {
+                      File qf = qfOf(dir);
+                      String json = readText(qf);
+                      if (json.isEmpty()) return;
+                      StringBuilder out = new StringBuilder("[");
+                      boolean first = true;
+                      Matcher m = Pattern.compile("\\{[^\\{\\}]*\\}").matcher(json);
+                      while (m.find()) {
+                          String obj = m.group();
+                          boolean drop = false;
+                          Matcher im = Pattern.compile("\"id\":\"([^\"]+)\"").matcher(obj);
+                          if (im.find() && set.contains(im.group(1))) drop = true;
+                          if (drop) {
+                              Matcher nm = Pattern.compile("\"nkey\":\"([^\"]+)\"").matcher(obj);
+                              if (nm.find()) markSeen(dir, nm.group(1));
+                          } else {
+                              if (!first) out.append(",");
+                              first = false;
+                              out.append(obj);
+                          }
+                      }
+                      out.append("]");
+                      writeText(qf, out.toString());
+                  }
+              }
+
+              // ── 已处理集合（seen）─────────────────────────────────
+              private static void markSeen(File dir, String nkey) {
+                  if (nkey == null || nkey.isEmpty()) return;
+                  synchronized (LOCK) {
+                      File sf = seenOf(dir);
+                      String cur = readText(sf);
+                      long now = System.currentTimeMillis();
+                      StringBuilder out = new StringBuilder("[");
+                      boolean first = true, exists = false;
+                      Matcher m = Pattern.compile("\\{[^\\{\\}]*\\}").matcher(cur);
+                      while (m.find()) {
+                          String obj = m.group();
+                          Matcher tm = Pattern.compile("\"ts\":(\\d+)").matcher(obj);
+                          long t = tm.find() ? Long.parseLong(tm.group(1)) : now;
+                          if (now - t > TTL_MS) continue;                  // 超期清除
+                          if (obj.contains("\"nkey\":\"" + esc(nkey) + "\"")) exists = true;
+                          if (!first) out.append(",");
+                          first = false;
+                          out.append(obj);
+                      }
+                      out.append("]");
+                      String next = out.toString();
+                      if (!exists) {
+                          String add = "{\"nkey\":\"" + esc(nkey) + "\",\"ts\":" + now + "}";
+                          String base = next.endsWith("]") ? next.substring(0, next.length() - 1) : next;
+                          if (base.endsWith(",")) base = base.substring(0, base.length() - 1);
+                          next = base + "," + add + "]";
+                      }
+                      writeText(sf, next);
+                  }
+              }
+              private static boolean nkeyInSeen(File dir, String nkey) {
+                  if (nkey == null) return false;
+                  synchronized (LOCK) {
+                      String s = readText(seenOf(dir));
+                      if (s.isEmpty()) return false;
+                      long now = System.currentTimeMillis();
+                      Matcher m = Pattern.compile("\\{[^\\{\\}]*\\}").matcher(s);
+                      while (m.find()) {
+                          String obj = m.group();
+                          if (!obj.contains("\"nkey\":\"" + esc(nkey) + "\"")) continue;
+                          Matcher tm = Pattern.compile("\"ts\":(\\d+)").matcher(obj);
+                          if (tm.find()) {
+                              try { if (now - Long.parseLong(tm.group(1)) > TTL_MS) return false; } catch (Exception ignored) {}
+                          }
+                          return true;
+                      }
+                      return false;
+                  }
+              }
+
+              // ── 运行证据（用客观记录代替猜测）────────────────────────
+              public static String evidenceRead(File dir) { return readText(evOf(dir)); }
+              public static void evSet(File dir, String k, String v) {
+                  synchronized (LOCK) {
+                      java.util.HashMap<String, String> m = evMap(dir);
+                      m.put(k, v);
+                      evWrite(dir, m);
+                  }
+              }
+              public static void evInc(File dir, String k, String tsKey) {
+                  synchronized (LOCK) {
+                      java.util.HashMap<String, String> m = evMap(dir);
                       int cur = 0; try { cur = Integer.parseInt(m.get(k)); } catch (Exception e) {}
                       m.put(k, String.valueOf(cur + 1));
                       if (tsKey != null) m.put(tsKey, String.valueOf(System.currentTimeMillis()));
-                      evWrite(m);
+                      evWrite(dir, m);
                   }
               }
-              /** 一次读改写，记录一条通知（避免多次文件往返） */
-              private void evRecordNotif(String app, boolean isPay) {
+              private static java.util.HashMap<String, String> evMap(File dir) {
+                  java.util.HashMap<String, String> m = new java.util.HashMap<>();
+                  String s = readText(evOf(dir));
+                  for (String line : s.split("\n")) {
+                      int i = line.indexOf('=');
+                      if (i > 0) m.put(line.substring(0, i), line.substring(i + 1));
+                  }
+                  return m;
+              }
+              private static void evWrite(File dir, java.util.HashMap<String, String> m) {
+                  StringBuilder sb = new StringBuilder();
+                  for (java.util.Map.Entry<String, String> e : m.entrySet())
+                      sb.append(e.getKey()).append('=').append(e.getValue()).append('\n');
+                  writeText(evOf(dir), sb.toString());
+              }
+              /** 一条通知到达：记时间/来源/是否支付类 */
+              private static void evRecordNotif(File dir, String app, boolean isPay) {
                   synchronized (LOCK) {
-                      java.util.HashMap<String, String> m = evRead();
+                      java.util.HashMap<String, String> m = evMap(dir);
                       m.put("lastNotifTs", String.valueOf(System.currentTimeMillis()));
                       m.put("lastNotifApp", app == null ? "" : app);
                       String ck = isPay ? "notifPay" : "notifNonPay";
                       int c = 0; try { c = Integer.parseInt(m.get(ck)); } catch (Exception e) {}
                       m.put(ck, String.valueOf(c + 1));
-                      evWrite(m);
+                      evWrite(dir, m);
                   }
               }
-              public String evidence() {
-                  try { return readAll(evFile()); } catch (Exception e) { return ""; }
-              }
 
-              private String readAll(File f) throws Exception {
-                  if (f == null || !f.exists()) return "";
-                  byte[] b = new byte[(int) Math.min(f.length(), 4*1024*1024)];
-                  FileInputStream fi = new FileInputStream(f);
-                  int off = 0, r;
-                  while (off < b.length && (r = fi.read(b, off, b.length - off)) > 0) { off += r; }
-                  fi.close();
-                  return new String(b, 0, off, "UTF-8");
+              // ── 判定 / 工具 ────────────────────────────────────────
+              public static boolean isEnabled(Context ctx) {
+                  try {
+                      String flat = Settings.Secure.getString(ctx.getContentResolver(), "enabled_notification_listeners");
+                      return flat != null && flat.contains(ctx.getPackageName());
+                  } catch (Exception e) { return false; }
               }
-              private void writeAll(File f, String s) throws Exception {
-                  FileOutputStream fo = new FileOutputStream(f);
-                  fo.write(s.getBytes("UTF-8"));
-                  fo.close();
-              }
-              private String hash(String s) {
+              private static String hash(String s) {
                   long h = 1125899906842597L;
                   if (s == null) s = "";
                   for (int i = 0; i < s.length(); i++) h = 31 * h + s.charAt(i);
                   return Long.toHexString(h);
               }
-              /** 是否为支付类通知：必须同时出现「金额」+「支付类关键词」，否则不入队 */
-              private boolean looksLikePayment(String title, String text) {
+              /** 支付类通知：必须同时有「金额」+「支付关键词」，聊天/新闻/验证码一律不入队 */
+              private static boolean looksLikePayment(String title, String text) {
                   String s = ((title == null ? "" : title) + " " + (text == null ? "" : text)).trim();
                   if (s.length() < 4) return false;
-                  boolean hasAmt = java.util.regex.Pattern.compile(
+                  boolean hasAmt = Pattern.compile(
                       "([\u00a5\uffe5]\\s?\\d)|(\\d[\\d,]*(\\.\\d{1,2})?\\s*\u5143)").matcher(s).find();
                   if (!hasAmt) return false;
-                  return java.util.regex.Pattern.compile(
+                  return Pattern.compile(
                       "\u652f\u4ed8|\u6d88\u8d39|\u652f\u51fa|\u6536\u5165|\u5230\u8d26|\u6263\u6b3e|\u9000\u6b3e|\u8f6c\u8d26|\u6536\u6b3e|\u5165\u8d26|\u4ea4\u6613|\u4f59\u989d|\u4ed8\u6b3e|\u94f6\u884c\u5361|\u50a8\u84c4\u5361|\u4fe1\u7528\u5361|\u82b1\u5457|\u8fd8\u6b3e"
                   ).matcher(s).find();
               }
+              private static String str(CharSequence cs) {
+                  String v = cs == null ? "" : cs.toString();
+                  return v.equals("null") ? "" : v;
+              }
+              private static String esc(String s) {
+                  if (s == null) return "";
+                  return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ").replace("\r", " ");
+              }
 
+              // ── 生命周期 ──────────────────────────────────────────
               @Override
               public IBinder onBind(Intent intent) { return super.onBind(intent); }
 
-              /** 服务是否处于已连接状态（供 JS 显示诊断） */
               public static volatile boolean sConnected = false;
               public static boolean isConnected() { return sConnected; }
 
@@ -728,8 +877,8 @@ jobs:
               public void onListenerConnected() {
                   super.onListenerConnected();
                   sConnected = true;
-                  evInc("connectCount", "lastConnectTs");
-                  // 刚连上时补抓一次当前通知栏，避免断连期间漏掉的支付
+                  evInc(getFilesDir(), "connectCount", "lastConnectTs");
+                  // 刚连上时补抓一次通知栏，避免断连期间漏掉的支付
                   try {
                       StatusBarNotification[] sns = getActiveNotifications();
                       if (sns != null) for (StatusBarNotification sbn : sns) appendNotification(sbn);
@@ -740,8 +889,7 @@ jobs:
               public void onListenerDisconnected() {
                   super.onListenerDisconnected();
                   sConnected = false;
-                  evInc("disconnectCount", "lastDisconnectTs");
-                  // 被系统解绑后主动请求重连 —— 否则会出现"用一次就再也不进通知了"
+                  evInc(getFilesDir(), "disconnectCount", "lastDisconnectTs");
                   try {
                       if (android.os.Build.VERSION.SDK_INT >= 24) {
                           requestRebind(new android.content.ComponentName(
@@ -756,60 +904,48 @@ jobs:
               }
               @Override
               public void onNotificationRemoved(StatusBarNotification sbn) {
-                  // 移除时也补抓一次，避免重复清理导致丢失（JS 端会按 id 判重）
                   try { appendNotification(sbn); } catch (Exception e) { Log.e(TAG, "rm err", e); }
               }
               @Override
               public int onStartCommand(Intent intent, int flags, int startId) {
                   if (intent != null && ACTION_SEND.equals(intent.getAction())) {
-                      // 手动触发：全量入队一次（用于补漏），JS 判重会过滤
+                      File dir = getFilesDir();
                       int active = -1; boolean nul = false;
                       try {
                           StatusBarNotification[] sns = getActiveNotifications();
-                          if (sns == null) {
-                              // getActiveNotifications() 返回 null = 服务【未被系统绑定】，
-                              // 不是"通知栏空了"。以前这里会 NPE 被吞掉 → 扫描静默失败，无从察觉。
-                              nul = true; active = 0;
-                          } else {
-                              active = sns.length;
-                              for (StatusBarNotification sbn : sns) appendNotification(sbn);
-                          }
+                          if (sns == null) { nul = true; active = 0; }   // null = 服务未被系统绑定
+                          else { active = sns.length; for (StatusBarNotification sbn : sns) appendNotification(sbn); }
                       } catch (Exception e) { Log.e(TAG, "full err", e); }
-                      // 记录扫描证据：lastScanActive=通知栏现有条数, lastScanNull=是否未绑定
-                      evSet("lastScanActive", String.valueOf(active));
-                      evSet("lastScanNull", nul ? "1" : "0");
-                      evInc("scanCount", "lastScanTs");
+                      evSet(dir, "lastScanActive", String.valueOf(active));
+                      evSet(dir, "lastScanNull", nul ? "1" : "0");
+                      evInc(dir, "scanCount", "lastScanTs");
                   }
                   return START_STICKY;
               }
 
-              /** 把一条通知追加进队列（带唯一 id，供 JS 判重/确认） */
+              /** 把一条通知追加进队列 */
               private void appendNotification(StatusBarNotification sbn) throws Exception {
                   Notification n = sbn.getNotification();
                   if (n == null || n.extras == null) return;
-                  // 短信/支付通知正文可能存放在多个字段：textLines(含换行的正文)、text、bigText、subText
                   String title = str(n.extras.getCharSequence("android.title"));
                   String text = str(n.extras.getCharSequence("android.text"));
                   String big = str(n.extras.getCharSequence("android.bigText"));
                   String textLines = str(n.extras.getCharSequence("android.textLines"));
                   String sub = str(n.extras.getCharSequence("android.subText"));
                   String sum = str(n.extras.getCharSequence("android.summaryText"));
-                  // 合并所有可能存正文的字段；textLines(短信正文)优先级高，避免遗漏
                   String fulltext = (textLines + " " + text + " " + big + " " + sub + " " + sum).trim();
                   String combined = title + " " + fulltext;
                   if (combined.trim().isEmpty()) return;
-                  // 只收「像支付」的通知：必须同时有金额+支付关键词，聊天/新闻/邮件一律不入队
+                  File dir = getFilesDir();
                   boolean isPay = looksLikePayment(title, fulltext);
-                  evRecordNotif(sbn.getPackageName(), isPay);   // 留下硬证据：确实收到了什么
+                  evRecordNotif(dir, sbn.getPackageName(), isPay);   // 硬证据：确实收到过
                   if (!isPay) return;
-                  // 唯一通知标识：package | id | 内容哈希
-                  // 【关键】不能用 package|id 当唯一键：微信/银行的支付通知常用固定 id，
-                  // 只按 package|id 去重会被 seen 集合永久拦死 →「第一条能记、之后全不来」。
-                  // 加入内容哈希后：同一条通知重复回调(内容相同)仍去重，而新的支付(内容不同)照常入队。
+                  // 唯一键 = 包名 | 通知id | 内容哈希。
+                  // 只用 package|id 会被固定 id 的支付通知永久拦死（"第一条能记、之后全不来"）。
                   String nkey = sbn.getPackageName() + "|" + sbn.getId() + "|" + hash(title + "\u0001" + fulltext);
-                  if (queueHasNkey(nkey)) return;   // 队列里已有未处理的同一条 → 跳过
+                  if (queueHasNkey(dir, nkey)) return;
                   String id = java.util.UUID.randomUUID().toString().substring(0, 8)
-                             + "_" + System.currentTimeMillis();
+                            + "_" + System.currentTimeMillis();
                   String entry =
                         "{\"id\":\"" + id
                         + "\",\"nkey\":\"" + esc(nkey)
@@ -817,188 +953,7 @@ jobs:
                         + "\",\"title\":\"" + esc(title)
                         + "\",\"text\":\"" + esc(fulltext)
                         + "\",\"time\":" + System.currentTimeMillis() + "}";
-                  synchronized (LOCK) {
-                      File qf = queueFile();
-                      StringBuilder cur = new StringBuilder("");
-                      if (qf.exists()) {
-                         byte[] b = new byte[(int) Math.min(qf.length(), 4*1024*1024)];
-                         FileInputStream fi = new FileInputStream(qf);
-                         int off=0, r; while(off<b.length && (r=fi.read(b,off,b.length-off))>0){off+=r;}
-                         fi.close(); cur.append(new String(b,0,off,"UTF-8"));
-                      }
-                      String pending = cur.toString().trim();
-                      String next;
-                      if (pending.isEmpty() || pending.equals("[]")) {
-                          next = "[" + entry + "]";
-                      } else {
-                          String base = pending;
-                          if (base.endsWith("]")) base = base.substring(0, base.length()-1);
-                          if (base.endsWith(",")) base = base.substring(0, base.length()-1);
-                          next = base + "," + entry + "]";
-                      }
-                      FileOutputStream fo = new FileOutputStream(qf);
-                      fo.write(next.getBytes("UTF-8"));
-                      fo.close();
-                  }
-              }
-              private boolean queueHasNkey(String nkey) throws Exception {
-                  if (nkey == null) return false;
-                  synchronized (LOCK) {
-                      // 1) 已处理集合里有 → 永不追加(已入账/已确认/已跳过的通知不再回来)
-                      if (nkeyInSeen(nkey)) return true;
-                      // 2) 队列里还有未处理的同一条 → 跳过
-                      File qf = queueFile();
-                      if (qf.exists()) {
-                         byte[] b = new byte[(int) Math.min(qf.length(), 4*1024*1024)];
-                         FileInputStream fi = new FileInputStream(qf);
-                         int off=0, r; while(off<b.length && (r=fi.read(b,off,b.length-off))>0){off+=r;}
-                         fi.close();
-                         String s = new String(b,0,off,"UTF-8");
-                         if (s.contains("\"nkey\":\"" + nkey.replace("\\","\\\\").replace("\"","\\\"") + "\"")) return true;
-                      }
-                      return false;
-                  }
-              }
-              private File seenFile() { return new File(getFilesDir(), "seen_nkeys.json"); }
-              private void markSeen(String nkey) throws Exception {
-                  if (nkey == null || nkey.isEmpty()) return;
-                  synchronized (LOCK) {
-                      File sf = seenFile();
-                      String cur = "";
-                      if (sf.exists()) {
-                         byte[] b = new byte[(int) Math.min(sf.length(), 4*1024*1024)];
-                         FileInputStream fi = new FileInputStream(sf);
-                         int off=0, r; while(off<b.length && (r=fi.read(b,off,b.length-off))>0){off+=r;}
-                         fi.close(); cur = new String(b,0,off,"UTF-8");
-                      }
-                      long nowMs = System.currentTimeMillis();
-                      StringBuilder out = new StringBuilder("[");
-                      boolean first = true, exists = false;
-                      java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\{[^\\{\\}]*\\}").matcher(cur);
-                      while (m.find()) {
-                          String obj = m.group();
-                          java.util.regex.Matcher tm = java.util.regex.Pattern.compile("\"ts\":(\\d+)").matcher(obj);
-                          long t = tm.find() ? Long.parseLong(tm.group(1)) : nowMs;
-                          if (nowMs - t > TTL_MS) continue;   // 超过7天 → 自动清除
-                          if (obj.contains("\"nkey\":\"" + esc(nkey) + "\"")) exists = true;
-                          if (!first) out.append(",");
-                          first = false;
-                          out.append(obj);
-                      }
-                      out.append("]");
-                      String next = out.toString();
-                      if (!exists) {
-                          String add = "{\"nkey\":\"" + esc(nkey) + "\",\"ts\":" + nowMs + "}";
-                          String base = next.endsWith("]") ? next.substring(0, next.length()-1) : next;
-                          if (base.endsWith(",")) base = base.substring(0, base.length()-1);
-                          next = base + "," + add + "]";
-                      }
-                      FileOutputStream fo = new FileOutputStream(sf);
-                      fo.write(next.getBytes("UTF-8"));
-                      fo.close();
-                  }
-              }
-              private boolean nkeyInSeenLocked(String s, String nkey) {
-                  if (s == null || nkey == null) return false;
-                  long nowMs = System.currentTimeMillis();
-                  java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\{[^\\{\\}]*\\}").matcher(s);
-                  while (m.find()) {
-                      String obj = m.group();
-                      if (!obj.contains("\"nkey\":\"" + esc(nkey) + "\"")) continue;
-                      java.util.regex.Matcher tm = java.util.regex.Pattern.compile("\"ts\":(\\d+)").matcher(obj);
-                      if (tm.find()) { try { if (nowMs - Long.parseLong(tm.group(1)) > TTL_MS) return false; } catch (Exception ignored) {} }
-                      return true;
-                  }
-                  return false;
-              }
-              private boolean nkeyInSeen(String nkey) throws Exception {
-                  if (nkey == null) return false;
-                  synchronized (LOCK) {
-                      File sf = seenFile();
-                      if (!sf.exists()) return false;
-                      return nkeyInSeenLocked(readAll(sf), nkey);
-                  }
-              }
-
-              /** 读取队列全文（顺带把超过7天的条目自动清除） */
-              public String read() throws Exception {
-                  synchronized (LOCK) {
-                      File qf = queueFile();
-                      if (!qf.exists()) return "[]";
-                      String json = readAll(qf);
-                      long nowMs = System.currentTimeMillis();
-                      StringBuilder out = new StringBuilder("[");
-                      boolean first = true, dropped = false;
-                      java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\{[^\\{\\}]*\\}").matcher(json);
-                      while (m.find()) {
-                          String obj = m.group();
-                          java.util.regex.Matcher tm = java.util.regex.Pattern.compile("\"time\":(\\d+)").matcher(obj);
-                          long t = tm.find() ? Long.parseLong(tm.group(1)) : nowMs;
-                          if (nowMs - t > TTL_MS) { dropped = true; continue; }   // 超过7天 → 自动清除
-                          if (!first) out.append(",");
-                          first = false;
-                          out.append(obj);
-                      }
-                      out.append("]");
-                      String res = out.toString();
-                      if (dropped) { try { writeAll(qf, res); } catch (Exception ignored) {} }
-                      return res;
-                  }
-              }
-
-              /** 通用内部文件读写（供「已处理集合/滞留箱」等状态持久化用，不走下载目录） */
-              public String readFileText(File f) throws Exception { return readAll(f); }
-              public void writeFileText(File f, String s) throws Exception { writeAll(f, s); }
-
-              /** 消费确认：删除指定 id 的条目 */
-              public void ack(String[] ids) throws Exception {
-                  if (ids == null) return;
-                  java.util.Set<String> set = new java.util.HashSet<>();
-                  for (String i : ids) set.add(i);
-                  synchronized (LOCK) {
-                      File qf = queueFile();
-                      if (!qf.exists()) return;
-                      byte[] b = new byte[(int) Math.min(qf.length(), 4*1024*1024)];
-                      FileInputStream fi = new FileInputStream(qf);
-                      int off=0, r; while(off<b.length && (r=fi.read(b,off,b.length-off))>0){off+=r;}
-                      fi.close();
-                      String json = new String(b,0,off,"UTF-8"); // [{...},{"id":"x"},...]
-                      StringBuilder out = new StringBuilder("[");
-                      boolean first=true;
-                      // 简单按 {"id":...} 对象拆分过滤
-                      int i=0; String s=json.trim();
-                      if (s.startsWith("[")) s = s.substring(1);
-                      if (s.endsWith("]")) s = s.substring(0, s.length()-1);
-                      java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\{[^\\{\\}]*\\}").matcher(s);
-                      while (m.find()) {
-                          String obj = m.group();
-                          boolean drop=false;
-                          java.util.regex.Matcher im = java.util.regex.Pattern.compile("\"id\":\"([^\"]+)\"").matcher(obj);
-                          if (im.find() && set.contains(im.group(1))) drop=true;
-                          if (drop) {
-                              // 该条目已处理：把 nkey 记入 seen 集合，防止 triggerScan 再把通知栏残留的同一条加回来
-                              java.util.regex.Matcher nm = java.util.regex.Pattern.compile("\"nkey\":\"([^\"]+)\"").matcher(obj);
-                              if (nm.find()) { try { markSeen(nm.group(1)); } catch (Exception ignored) {} }
-                          } else {
-                              if (!first) out.append(",");
-                              first=false;
-                              out.append(obj);
-                          }
-                      }
-                      out.append("]");
-                      FileOutputStream fo = new FileOutputStream(qf);
-                      fo.write(out.toString().getBytes("UTF-8"));
-                      fo.close();
-                  }
-              }
-
-              private String str(CharSequence cs) {
-                  String v = cs==null ? "" : cs.toString();
-                  if (v.equals("null")) return "";
-                  return v;
-              }
-              private String esc(String s) {
-                  return s.replace("\\","\\\\").replace("\"","\\\"").replace("\n"," ").replace("\r"," ");
+                  queueAppend(dir, entry);
               }
           }
           JAVA
