@@ -383,6 +383,7 @@ input[type=checkbox]{accent-color:var(--accent)}
   <div class="sheet"><h3>支付待处理框</h3>
     <div style="font-size:11px;color:var(--text2);text-align:center;margin:-6px 0 8px">只放纯支付信息 · 已记账的自动删 · 清除的留 7 天可恢复</div>
     <div id="impStatusLine" style="font-size:11px;color:var(--text2);text-align:center;margin-bottom:8px"></div>
+    <div id="impConnHint" style="display:none;background:rgba(229,85,85,.08);border:1px solid rgba(229,85,85,.3);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12px;color:#e55;line-height:1.5"></div>
     <div id="importNotifyStatus" style="text-align:center;color:var(--text2);padding:16px 0;font-size:14px">点击扫描，从通知/短信收取支付信息</div>
     <div id="importNotifyList" style="max-height:44vh;overflow-y:auto;margin-bottom:10px"></div>
     <button class="submit" onclick="doImportScan()">🔍 扫描（通知+短信）</button>
@@ -1291,6 +1292,38 @@ function impStatusText(){
 function refreshImpStatus(){
   const el=document.getElementById('impStatusLine');
   if(el) el.textContent=impStatusText();
+  const hint=document.getElementById('impConnHint');
+  if(!hint) return;
+  let need=false, msg='';
+  try{
+    if(window.MinisBridge && typeof window.MinisBridge.notifStatus==='function'){
+      const o=JSON.parse(window.MinisBridge.notifStatus()||'{}');
+      if(!o.granted){
+        need=true;
+        msg='「通知使用权」没开 → 收不到任何支付通知（只靠短信会漏掉5G消息）。';
+      } else if(!o.connected){
+        need=true;
+        msg='通知服务【未连接】——系统把服务解绑了，所以新通知进不来（这就是"用一次就失灵"的原因）。点下面按钮重连；若无效，去设置里把「记账」的通知使用权关掉再打开。';
+        if(typeof window.MinisBridge.requestRebind==='function'){
+          try{ window.MinisBridge.requestRebind(); }catch(e){}
+        }
+      }
+    }
+  }catch(e){}
+  hint.style.display=need?'block':'none';
+  if(need){
+    hint.innerHTML=msg+'<div style="margin-top:6px;display:flex;gap:8px">'
+      +'<button onclick="reconnectNotif()" style="background:#e55;border:none;border-radius:6px;color:#fff;font-size:12px;padding:5px 10px">重连通知服务</button>'
+      +'<button onclick="if(window.MinisBridge)window.MinisBridge.openNotifSettings()" style="background:none;border:1px solid #e55;border-radius:6px;color:#e55;font-size:12px;padding:5px 10px">打开通知设置</button>'
+      +'</div>';
+  }
+}
+function reconnectNotif(){
+  if(window.MinisBridge && typeof window.MinisBridge.requestRebind==='function'){
+    try{ window.MinisBridge.requestRebind(); }catch(e){}
+  }
+  ts('已请求重连，2秒后自动重新检测…');
+  setTimeout(()=>{ refreshImpStatus(); doImportScan(); }, 2000);
 }
 function showImpDiag(){
   const st=document.getElementById('importNotifyStatus');
@@ -1390,14 +1423,48 @@ function unmarkHandled(key){
 function clearHandled(){ HANDLED=new Set(); HANDLED_ARR=[]; stateWrite(BOX_HANDLED_KEY,[]); }
 
 // ---- 已清除区（灰显留存 7 天，可恢复）----
+// 已清除区：同一 key 只保留最新一条（原来重复清除会堆积成 4 条一模一样的）
 function loadDismissed(){
   const cut=Date.now()-IMP_TTL;
   let arr=stateRead(BOX_DISMISS_KEY); if(!Array.isArray(arr)) arr=[];
-  const kept=arr.filter(d=>d&&d.ts>=cut&&d.t);
+  const seen={}, kept=[];
+  for(const d of arr){
+    if(!d||!d.t||!(d.ts>=cut)) continue;
+    const k=entryKey(d.t)||d.t.finger||JSON.stringify(d.t).slice(0,60);
+    if(seen[k]) continue;          // 重复的丢掉（保留最早那条的 ts）
+    seen[k]=1; kept.push(d);
+  }
   if(kept.length!==arr.length) stateWrite(BOX_DISMISS_KEY,kept);
   return kept;
 }
+// 加进「已清除」：同 key 已在则不再重复添加
+function addDismissed(t){
+  const dis=loadDismissed();
+  const k=entryKey(t)||t.finger||'';
+  if(k && dis.some(d=>(entryKey(d.t)||d.t.finger||'')===k)) return dis;   // 已有 → 不重复
+  dis.push({ts:Date.now(),t:t});
+  saveDismissed(dis);
+  return dis;
+}
 function saveDismissed(arr){ stateWrite(BOX_DISMISS_KEY,arr); }
+
+// 彻底删除：从「已清除」移除 + 记入已处理集合 → 永不再出现（也不可恢复）
+function purgeDismissed(i){
+  const dis=loadDismissed(); const d=dis[i]; if(!d) return;
+  const k=entryKey(d.t)||d.t.finger||'';
+  dis.splice(i,1); saveDismissed(dis);
+  if(k) markHandled([k]);
+  renderImpList(); ts('已彻底删除');
+}
+async function purgeAllDismissed(){
+  const dis=loadDismissed();
+  if(!dis.length) return ts('已清除区是空的');
+  if(!await confirmBox('彻底删除「已清除」里全部 '+dis.length+' 条？\n删除后不再出现，也无法恢复。')) return;
+  const keys=dis.map(d=>entryKey(d.t)||d.t.finger||'').filter(Boolean);
+  if(keys.length) markHandled(keys);
+  saveDismissed([]);
+  renderImpList(); ts('已彻底删除 '+dis.length+' 条');
+}
 
 // ---- 条目标识（持久、内容相关；不用时间戳，避免重号）----
 function notifKey(n){ return n&&n.nkey?('n:'+n.nkey):(n&&n.id?('nid:'+n.id):''); }
@@ -1439,10 +1506,14 @@ function renderImpList(){
   let html='';
   if(impTx.length) html+=impTx.map((t,i)=>impRowHtml(t,i)).join('');
   if(dis.length){
-    html+=`<div style="margin-top:12px;padding-top:8px;border-top:1px dashed var(--border);font-size:12px;color:var(--text2)">已清除（灰显留存 7 天，可恢复）</div>`
+    html+=`<div style="margin-top:12px;padding-top:8px;border-top:1px dashed var(--border);display:flex;align-items:center;gap:8px">
+        <span style="flex:1;font-size:12px;color:var(--text2)">已清除（灰显留存 7 天，可恢复）</span>
+        <button onclick="purgeAllDismissed()" style="background:none;border:1px solid var(--border);border-radius:6px;color:#e55;font-size:11px;padding:3px 8px;cursor:pointer">全部删除</button>
+      </div>`
       + dis.map((d,i)=>`<div style="display:flex;align-items:center;padding:6px 0;gap:8px;font-size:12px;color:var(--text2);opacity:.6">
           <span style="flex:1;text-decoration:line-through">¥${Number(d.t.amount).toFixed(2)} · ${(d.t.note||'').replace(/</g,'&lt;')}</span>
           <button onclick="undelImpItem(${i})" style="background:none;border:none;color:var(--accent);font-size:12px;padding:0 4px;cursor:pointer">恢复</button>
+          <button onclick="purgeDismissed(${i})" style="background:none;border:none;color:#e55;font-size:12px;padding:0 4px;cursor:pointer" title="彻底删除，不再出现">删</button>
         </div>`).join('');
   }
   list.innerHTML=html;
@@ -1602,7 +1673,15 @@ async function doImportScan(){
         }
       }
       st.style.display='block';
-      st.textContent=window.__impDiag+'\n没有可入账的支付信息。请保留银行/微信/支付宝的支付通知或短信后重新扫描。';
+      let why='';
+      try{
+        if(window.MinisBridge && typeof window.MinisBridge.notifStatus==='function'){
+          const o=JSON.parse(window.MinisBridge.notifStatus()||'{}');
+          if(!o.granted) why='\n⚠ 通知使用权未开启 → 支付通知收不到（5G消息类银行通知也不在短信库里）。';
+          else if(!o.connected) why='\n⚠ 通知服务未连接 → 新通知进不来。点上面「重连通知服务」。';
+        }
+      }catch(e){}
+      st.textContent=window.__impDiag+why+'\n没有可入账的支付信息。保留支付通知/短信后重新扫描。';
       document.getElementById('importNotifyList').innerHTML='';
       return;
     }
@@ -1630,8 +1709,8 @@ async function delImpItemConfirm(i,t){
     if(t._rawNkey && skip.indexOf(t._rawNkey)<0) skip.push(t._rawNkey);
     localStorage.setItem(IMP_SKIP_KEY,JSON.stringify(skip));
   }catch(e){}
-  // ③ 移到「已清除」区，灰显留存 7 天，可恢复
-  const dis=loadDismissed(); dis.push({ts:Date.now(), t:t}); saveDismissed(dis);
+  // ③ 移到「已清除」区，灰显留存 7 天，可恢复（同 key 不重复堆积）
+  addDismissed(t);
   impTx.splice(i,1);
   renderImpList();
   ts('已清除，7天内可恢复');
@@ -2003,9 +2082,19 @@ ra();
   function startPoll(){ if(pollTimer) return; pollTimer=setInterval(()=>{ if(document.visibilityState==='visible') autoBookkeep(); },5000); }
   function stopPoll(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
   if(document.visibilityState==='visible') startPoll();
-  // 3) visibilitychange / focus 事件：切回前台立即处理
-  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible' && bridgeOK()){ startPoll(); autoBookkeep(); } });
-  window.addEventListener('focus',()=>{ if(bridgeOK()){ autoBookkeep(); } });
+  // 3) visibilitychange / focus 事件：切回前台立即处理 + 检查通知服务是否掉线
+  function ensureNotifAlive(){
+    try{
+      if(!window.MinisBridge || typeof window.MinisBridge.notifStatus!=='function') return;
+      const o=JSON.parse(window.MinisBridge.notifStatus()||'{}');
+      // 已授权但服务未连接 → 主动请求重连（国产ROM会静默解绑，这是"用一次就失灵"的根因）
+      if(o.granted && !o.connected && typeof window.MinisBridge.requestRebind==='function'){
+        window.MinisBridge.requestRebind();
+      }
+    }catch(e){}
+  }
+  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible' && bridgeOK()){ startPoll(); ensureNotifAlive(); autoBookkeep(); } });
+  window.addEventListener('focus',()=>{ if(bridgeOK()){ ensureNotifAlive(); autoBookkeep(); } });
 })();
 // Fullscreen toggle
 function toggleFS(){
