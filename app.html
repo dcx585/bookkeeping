@@ -1271,22 +1271,49 @@ function closeImportNotify(){document.getElementById('importNotifyModal').classL
 
 // ── 诊断：把"为什么没抓到"摊开给用户看 ──
 let __impRaw={notif:[],sms:[],nNotif:0,nSms:0,nRecent:0,nPay:0,lastScan:''};
+// 读服务留下的运行证据（key=value 文本），重启不丢，无法被"猜"掩盖
+function readEvidence(){
+  const ev={};
+  try{
+    if(window.MinisBridge && typeof window.MinisBridge.notifEvidence==='function'){
+      const s=window.MinisBridge.notifEvidence()||'';
+      s.split('\n').forEach(line=>{
+        const i=line.indexOf('=');
+        if(i>0) ev[line.slice(0,i)]=line.slice(i+1);
+      });
+    }
+  }catch(e){}
+  return ev;
+}
+function agoText(ts){
+  const t=Number(ts||0); if(!t) return '从未';
+  const s=Math.floor((Date.now()-t)/1000);
+  if(s<60) return s+'秒前';
+  if(s<3600) return Math.floor(s/60)+'分钟前';
+  if(s<86400) return Math.floor(s/3600)+'小时前';
+  return Math.floor(s/86400)+'天前';
+}
 function impStatusText(){
   const parts=[];
+  let granted=null;
   try{
     if(window.MinisBridge && typeof window.MinisBridge.notifStatus==='function'){
       const o=JSON.parse(window.MinisBridge.notifStatus()||'{}');
-      parts.push('通知读取 '+(o.granted?'已授权':'未授权'));
-      parts.push('服务 '+(o.connected?'已连接':'未连接'));
+      granted=o.granted;
+      parts.push('通知权 '+(o.granted?'已开':'未开'));
       parts.push('队列 '+o.queue+'条');
-      // 已授权但服务没连上 → 主动请求重连（"用一次就死"多因被系统解绑）
-      if(o.granted && !o.connected && typeof window.MinisBridge.requestRebind==='function'){
-        try{ window.MinisBridge.requestRebind(); }catch(e){}
-      }
     }
-  }catch(e){ parts.push('状态读取失败'); }
-  parts.push('短信读到 '+__impRaw.nSms+'条');
-  if(__impRaw.lastScan) parts.push('上次 '+__impRaw.lastScan);
+  }catch(e){}
+  const ev=readEvidence();
+  const seen=(Number(ev.notifPay||0)+Number(ev.notifNonPay||0));
+  if(ev.lastNotifTs){
+    parts.push('收到通知 '+seen+'条(支付类'+Number(ev.notifPay||0)+')·最近'+agoText(ev.lastNotifTs));
+  } else {
+    parts.push('收到通知 0条');
+  }
+  parts.push('服务连过 '+Number(ev.connectCount||0)+'次');
+  if(ev.lastScanTs) parts.push('扫通知栏 '+Number(ev.lastScanActive||0)+'条');
+  parts.push('短信 '+__impRaw.nSms+'条');
   return parts.join(' · ');
 }
 function refreshImpStatus(){
@@ -1294,25 +1321,28 @@ function refreshImpStatus(){
   if(el) el.textContent=impStatusText();
   const hint=document.getElementById('impConnHint');
   if(!hint) return;
-  let need=false, msg='';
+  let granted=null;
   try{
     if(window.MinisBridge && typeof window.MinisBridge.notifStatus==='function'){
-      const o=JSON.parse(window.MinisBridge.notifStatus()||'{}');
-      if(!o.granted){
-        need=true;
-        msg='「通知使用权」没开 → 收不到任何支付通知（只靠短信会漏掉5G消息）。';
-      } else if(!o.connected){
-        need=true;
-        msg='通知服务【未连接】——系统把服务解绑了，所以新通知进不来（这就是"用一次就失灵"的原因）。点下面按钮重连；若无效，去设置里把「记账」的通知使用权关掉再打开。';
-        if(typeof window.MinisBridge.requestRebind==='function'){
-          try{ window.MinisBridge.requestRebind(); }catch(e){}
-        }
-      }
+      granted=JSON.parse(window.MinisBridge.notifStatus()||'{}').granted;
     }
   }catch(e){}
+  const ev=readEvidence();
+  let need=false, msg='';
+  if(granted===false){
+    need=true;
+    msg='「通知使用权」没开 → 收不到任何支付通知（短信库里没有的5G消息也收不到）。';
+  } else if(ev.lastScanNull==='1'){
+    // 硬证据：getActiveNotifications() 返回 null = 服务确实没被系统绑定
+    need=true;
+    msg='系统没有绑定通知服务（扫描通知栏返回空）——新通知进不来。点「重连通知服务」；无效就去设置里把「记账」的通知使用权关掉再打开。';
+  } else if(granted && !ev.lastNotifTs){
+    need=true;
+    msg='还没收到过任何通知。若你明明有支付通知却一直为空，多半是系统在后台把服务解绑了 —— 建议在系统设置里给「记账」打开「后台高耗电」「允许自启动」。';
+  }
   hint.style.display=need?'block':'none';
   if(need){
-    hint.innerHTML=msg+'<div style="margin-top:6px;display:flex;gap:8px">'
+    hint.innerHTML=msg+'<div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap">'
       +'<button onclick="reconnectNotif()" style="background:#e55;border:none;border-radius:6px;color:#fff;font-size:12px;padding:5px 10px">重连通知服务</button>'
       +'<button onclick="if(window.MinisBridge)window.MinisBridge.openNotifSettings()" style="background:none;border:1px solid #e55;border-radius:6px;color:#e55;font-size:12px;padding:5px 10px">打开通知设置</button>'
       +'</div>';
@@ -1328,10 +1358,19 @@ function reconnectNotif(){
 function showImpDiag(){
   const st=document.getElementById('importNotifyStatus');
   st.style.display='block';
-  let s=impStatusText();
-  s+='\n\n【通知队列 '+__impRaw.nNotif+' 条】';
+  const ev=readEvidence();
+  let s='';
+  s+='【服务运行证据】（这些是服务自己记的，重启不丢）\n';
+  s+='收到通知：支付类 '+Number(ev.notifPay||0)+' 条 / 非支付 '+Number(ev.notifNonPay||0)+' 条\n';
+  s+='最近一条：'+(ev.lastNotifTs?(agoText(ev.lastNotifTs)+'（'+(ev.lastNotifApp||'?')+'）'):'从未收到')+'\n';
+  s+='服务连接：'+Number(ev.connectCount||0)+' 次，最近 '+(ev.lastConnectTs?agoText(ev.lastConnectTs):'无')+'\n';
+  s+='被解绑：'+Number(ev.disconnectCount||0)+' 次，最近 '+(ev.lastDisconnectTs?agoText(ev.lastDisconnectTs):'无')+'\n';
+  s+='扫描通知栏：'+Number(ev.scanCount||0)+' 次，最近一次看到 '+Number(ev.lastScanActive||0)+' 条通知';
+  s+= (ev.lastScanNull==='1') ? '  ⚠返回null=服务未被系统绑定\n' : '\n';
+  s+='\n'+impStatusText();
+  s+='\n\n【本轮队列 '+__impRaw.nNotif+' 条】';
   s+= __impRaw.notif.length ? ('\n'+__impRaw.notif.join('\n'))
-                            : '\n(空 —— 通知服务没抓到。看上面"服务/授权"状态)';
+                            : '\n(空)';
   s+='\n\n【短信共 '+__impRaw.nSms+' 条，近7天 '+__impRaw.nRecent+' 条，原文样本】';
   s+= __impRaw.sms.length ? ('\n'+__impRaw.sms.join('\n'))
                           : '\n(空 —— 未授权读取短信，或短信库为空)';
@@ -1675,11 +1714,14 @@ async function doImportScan(){
       st.style.display='block';
       let why='';
       try{
+        const ev=readEvidence();
+        let granted=null;
         if(window.MinisBridge && typeof window.MinisBridge.notifStatus==='function'){
-          const o=JSON.parse(window.MinisBridge.notifStatus()||'{}');
-          if(!o.granted) why='\n⚠ 通知使用权未开启 → 支付通知收不到（5G消息类银行通知也不在短信库里）。';
-          else if(!o.connected) why='\n⚠ 通知服务未连接 → 新通知进不来。点上面「重连通知服务」。';
+          granted=JSON.parse(window.MinisBridge.notifStatus()||'{}').granted;
         }
+        if(granted===false) why='\n⚠ 通知使用权未开 → 支付通知收不到（5G消息类银行通知也不在短信库里）。';
+        else if(ev.lastScanNull==='1') why='\n⚠ 服务未被系统绑定（扫描通知栏返回空）→ 点上面「重连通知服务」。';
+        else if(!ev.lastNotifTs) why='\n⚠ 服务从未收到过通知。若确实有支付通知，请在系统设置给「记账」开「后台高耗电/自启动」。';
       }catch(e){}
       st.textContent=window.__impDiag+why+'\n没有可入账的支付信息。保留支付通知/短信后重新扫描。';
       document.getElementById('importNotifyList').innerHTML='';
@@ -2083,12 +2125,24 @@ ra();
   function stopPoll(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
   if(document.visibilityState==='visible') startPoll();
   // 3) visibilitychange / focus 事件：切回前台立即处理 + 检查通知服务是否掉线
+  let __lastRebind=0;
   function ensureNotifAlive(){
     try{
-      if(!window.MinisBridge || typeof window.MinisBridge.notifStatus!=='function') return;
-      const o=JSON.parse(window.MinisBridge.notifStatus()||'{}');
-      // 已授权但服务未连接 → 主动请求重连（国产ROM会静默解绑，这是"用一次就失灵"的根因）
-      if(o.granted && !o.connected && typeof window.MinisBridge.requestRebind==='function'){
+      if(!window.MinisBridge) return;
+      // 用【证据】判断，不再用进程重启就误报的静态标志：
+      //   - 明确未被绑定(lastScanNull=1)，或
+      //   - 解绑次数 > 连接次数（说明解绑后没连回来）
+      const ev=readEvidence();
+      let granted=false;
+      if(typeof window.MinisBridge.notifStatus==='function'){
+        granted=!!JSON.parse(window.MinisBridge.notifStatus()||'{}').granted;
+      }
+      const unbound = (ev.lastScanNull==='1');
+      const dangling = Number(ev.disconnectCount||0) > Number(ev.connectCount||0);
+      const now=Date.now();
+      if(granted && (unbound||dangling) && (now-__lastRebind>30000)
+         && typeof window.MinisBridge.requestRebind==='function'){
+        __lastRebind=now;
         window.MinisBridge.requestRebind();
       }
     }catch(e){}
