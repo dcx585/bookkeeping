@@ -388,6 +388,7 @@ input[type=checkbox]{accent-color:var(--accent)}
     <div id="importNotifyList" style="max-height:44vh;overflow-y:auto;margin-bottom:10px"></div>
     <button class="submit" onclick="doImportScan()">🔍 扫描（通知+短信）</button>
     <button class="submit" id="importConfirmBtn" onclick="doImportConfirm()" style="display:none">✓ 确认入账</button>
+    <button class="cancel-btn" onclick="selfTestParse()" style="margin-top:4px;font-size:12px;opacity:.7">解析自测（不用付钱）</button>
     <button class="cancel-btn" onclick="showImpDiag()" style="margin-top:4px;font-size:12px;opacity:.7">诊断（看原始数据）</button>
     <button class="cancel-btn" onclick="clearHandled();ts('已清空「已处理」记录，下次扫描会重新判定')" style="margin-top:4px;font-size:12px;opacity:.7">清空已处理记录</button>
     <button class="cancel-btn" onclick="closeImportNotify()" style="margin-top:4px">关闭</button>
@@ -1362,6 +1363,41 @@ function reconnectNotif(){
   ts('已请求重连，2秒后自动重新检测…');
   setTimeout(()=>{ refreshImpStatus(); doImportScan(); }, 2000);
 }
+function selfTestParse(){
+  // 不用付钱就能验证：把常见的真实通知文本喂进解析链路，看能不能出金额
+  const samples=[
+    ['工行短信','尾号2374卡9月19日20:43支出(消费支付宝-杭州深度求索人工智能基础技…)20元，余额169.10元'],
+    ['工行(只有余额，应剔除)','【工商银行】您尾号2374卡，余额1823.44元'],
+    ['微信支付','微信支付：已支付¥15.80'],
+    ['支付宝','你已成功付款 25.00 元'],
+    ['建行收入','您尾号1234的储蓄卡账户9月20日14时30分收入人民币100.00元，余额500.00元'],
+    ['招行支出','您账户1234于09月20日14:30网上支付人民币-35.50'],
+    ['农行消费','您尾号8899卡09月20日15:20消费人民币68.00元'],
+    ['云闪付','【云闪付】您尾号3344的银行卡消费12.50元'],
+    ['验证码(应剔除)','验证码123456，5分钟内有效，请勿泄露'],
+    ['营销(应剔除)','【银行】办卡享好礼，额度5万元，回复TD退订'],
+  ];
+  let out='【解析自测】\n注意：这里只测"文本 → 金额"这一步；能不能收到，看上面服务证据。\n\n';
+  let okN=0, badN=0;
+  samples.forEach(function(s){
+    const name=s[0], text=s[1];
+    const isPay=looksLikePaymentText(text);
+    let r=[];
+    try{ r=parseNotifFull({title:'',text:text,app:'',time:Date.now()}); }catch(e){}
+    // 预期：标「应剔除」的必须判为非支付；其余必须判为支付且解析出金额
+    const expectPay = !/应剔除/.test(name);
+    const good = expectPay ? (isPay && r.length>0) : !isPay;
+    if(good) okN++; else badN++;
+    out+=(good?'✅ ':'❌ ')+name+'：'+(isPay?'判为支付':'判为非支付')
+       +' → '+(r.length?r.map(function(x){return '¥'+x.amount+' '+(x.type==='income'?'收入':'支出')+'/'+x.category;}).join('、'):'未解析出金额')+'\n';
+  });
+  out+='\n合计：✅ '+okN+' 项正常'+(badN?('，❌ '+badN+' 项有问题 —— 请把本屏截图发我'):'（全部正常）');
+  const st=document.getElementById('importNotifyStatus');
+  st.style.display='block';
+  st.textContent=out;
+  document.getElementById('importNotifyList').innerHTML='';
+  return out;
+}
 function showImpDiag(){
   const st=document.getElementById('importNotifyStatus');
   st.style.display='block';
@@ -1394,39 +1430,7 @@ function showImpDiag(){
                           : '\n(空 —— 未授权读取短信，或短信库为空)';
   st.textContent=s;
 }
-// 从原始支付通知文本解析出记账项（金额/收支/分类/账户）
-function parseNotif(n){
-  const s=(n.title||'')+' '+(n.text||'')+(n.app||'');
-  // 提取金额：支持 ¥15.90、-13.80、支出 15.90 等
-  let amt=null;
-  let m=s.match(/[¥￥]\s?(\d+(?:\.\d{1,2})?)/);
-  if(m){amt=parseFloat(m[1]);}
-  else{
-    m=s.match(/(\d+(?:\.\d{1,2})?)\s?元/);
-    if(m)amt=parseFloat(m[1]);
-    else{m=s.match(/[－-]\s?(\d+(?:\.\d{1,2})?)/); if(m)amt=parseFloat(m[1]);}
-  }
-  if(amt==null) return null;
-  let type='expense';
-  const income=/收入|入账|收款|到账|存入|退回|退款|转入|红包|工资|收益/.test(s);
-  const expense=/支出|消费|付款|支付|已支出|扣款|转入[^收]|消费|转出|缴费|还款/.test(s);
-  const lower=s.toLowerCase();
-  const refund=/退款|退回|退货|取消/.test(s);
-  if(refund) type='income';
-  else if(income && !/支出|消费|付款|转出/.test(s)) type='income';
-  let category='其他';
-  if(/餐饮|吃饭|美团|饿了么|餐厅|外卖|超市|便利店|买菜|零食|奶茶|咖啡/.test(s)) category='餐饮';
-  else if(/淘宝|天猫|京东|拼多多|购物|商城|消费|购买/.test(s)) category='购物';
-  else if(/话费|流量|充值|移动|联通|电信/.test(s)) category='话费';
-  else if(/地铁|公交|打车|滴滴|车票|加油|停车|高速|铁路|航空/.test(s)) category='交通';
-  else if(/还款|信用卡|花呗|借呗|白条/.test(s)) category='还款';
-  else if(/工资|转账|红包|转入|收款|收入/.test(s)) category='其他';
-  let account='';
-  if(/支付宝/.test(s)) account='支付宝';
-  else if(/微信|财付通/.test(s)) account='微信';
-  else if(/银行卡|银行|招商|工商|建设|农业|中国银行/.test(s)) account='银行卡';
-  return {amount:amt, type:type, category:category, account:account, note:s.slice(0,40)};
-}
+
 // ── 待处理框 Payment Inbox ──────────────────────────────
 // 完整规则（面向长期，不只看眼前）：
 //   ① 只放【纯支付信息】：非支付的通知/短信，扫描时判掉 → 从源删除 + 持久标记 → 永不再出现
@@ -1463,6 +1467,18 @@ function loadHandled(){
   const cut=Date.now()-IMP_TTL;
   let arr=stateRead(BOX_HANDLED_KEY); if(!Array.isArray(arr)) arr=[];
   arr=arr.filter(x=>x&&x.k&&x.ts>=cut);
+  // 一次性迁移：旧版本把"忽略"存在 localStorage(IMP_SKIP_KEY)，整合进本集合，保住用户先前的忽略意图
+  try{
+    const legacy=JSON.parse(localStorage.getItem(IMP_SKIP_KEY)||'[]');
+    if(Array.isArray(legacy)&&legacy.length){
+      const have=new Set(arr.map(x=>x.k));
+      let moved=0;
+      legacy.forEach(k=>{ if(k&&!have.has('n:'+k)&&!have.has(k)){ arr.push({k:k,ts:Date.now()}); moved++; } });
+      if(moved) stateWrite(BOX_HANDLED_KEY,arr);
+      localStorage.removeItem(IMP_SKIP_KEY);
+      console.log('[记账] 已迁移旧忽略记录', moved, '条');
+    }
+  }catch(e){}
   HANDLED_ARR=arr; HANDLED=new Set(arr.map(x=>x.k));
   return HANDLED;
 }
@@ -1480,25 +1496,35 @@ function unmarkHandled(key){
 function clearHandled(){ HANDLED=new Set(); HANDLED_ARR=[]; stateWrite(BOX_HANDLED_KEY,[]); }
 
 // ---- 已清除区（灰显留存 7 天，可恢复）----
-// 已清除区：同一 key 只保留最新一条（原来重复清除会堆积成 4 条一模一样的）
+// 稳定去重键：不依赖 _boxKey/finger（旧版本存的记录没有这些字段，会导致同一笔堆成好几条）
+function dismissKey(t){
+  if(!t) return '';
+  const k=entryKey(t);
+  if(k) return k;
+  const d=new Date(t._smsDate||t._time||0);
+  const day=isNaN(d.getTime())?'?':d.toISOString().slice(0,10);
+  return [t._src||'', Number(t.amount||0).toFixed(2), (t.note||'').replace(/\s+/g,'').slice(0,24), day].join('|');
+}
+// 已清除区：同一笔只保留一条（原来重复清除会堆积成 4 条一模一样的）
 function loadDismissed(){
   const cut=Date.now()-IMP_TTL;
   let arr=stateRead(BOX_DISMISS_KEY); if(!Array.isArray(arr)) arr=[];
   const seen={}, kept=[];
   for(const d of arr){
     if(!d||!d.t||!(d.ts>=cut)) continue;
-    const k=entryKey(d.t)||d.t.finger||JSON.stringify(d.t).slice(0,60);
-    if(seen[k]) continue;          // 重复的丢掉（保留最早那条的 ts）
-    seen[k]=1; kept.push(d);
+    const k=dismissKey(d.t);
+    if(k&&seen[k]) continue;
+    if(k) seen[k]=1;
+    kept.push(d);
   }
   if(kept.length!==arr.length) stateWrite(BOX_DISMISS_KEY,kept);
   return kept;
 }
-// 加进「已清除」：同 key 已在则不再重复添加
+// 加进「已清除」：同一笔已在则不再重复添加
 function addDismissed(t){
   const dis=loadDismissed();
-  const k=entryKey(t)||t.finger||'';
-  if(k && dis.some(d=>(entryKey(d.t)||d.t.finger||'')===k)) return dis;   // 已有 → 不重复
+  const k=dismissKey(t);
+  if(k && dis.some(d=>dismissKey(d.t)===k)) return dis;
   dis.push({ts:Date.now(),t:t});
   saveDismissed(dis);
   return dis;
@@ -1764,12 +1790,6 @@ async function delImpItemConfirm(i,t){
   // ① 从源里真正删除：通知 → ack 原生队列；短信/通用 → 持久标记「已处理」
   if(t._src==='notice'&&t._rawId) ackPending([t._rawId]);
   if(key) markHandled([key]);
-  // ② 兼容旧忽略集(老版本遗留)
-  try{
-    const skip=JSON.parse(localStorage.getItem(IMP_SKIP_KEY)||'[]');
-    if(t._rawNkey && skip.indexOf(t._rawNkey)<0) skip.push(t._rawNkey);
-    localStorage.setItem(IMP_SKIP_KEY,JSON.stringify(skip));
-  }catch(e){}
   // ③ 移到「已清除」区，灰显留存 7 天，可恢复（同 key 不重复堆积）
   addDismissed(t);
   impTx.splice(i,1);
@@ -1844,9 +1864,12 @@ function looksLikePaymentText(s){
   const done=/已支付|已扣款|已消费|支付成功|扣款成功|交易成功|消费成功|已支出|入账成功|已到账|已收款|已退回|已退款|支出成功|已完成|已缴费|已充值|已转入|已转出/;
   if(/余额不足|欠费|请及时|温馨提醒|温馨提示|应缴|应还|现提醒|不足/.test(s) && !done.test(s)) return false;
   // ② 必须有金额
-  if(!/([¥￥]\s?\d)|(\d[\d,]*(\.\d{1,2})?\s?元)/.test(s)) return false;
+  // ★ 直接复用解析用的 findAmounts，不再自己维护一套金额正则。
+  //   以前两套规则不一致：判定说"非支付"，解析却能算出金额 →
+  //   像「网上支付人民币-35.50」这种真实银行通知被判成非支付【直接丢掉】。
+  if(!findAmounts(s).length) return false;
   // ③ 必须有支付动作词或账户词
-  const payWord=/支付|消费|支出|收入|到账|扣款|退款|退回|转账|收款|入账|交易|付款|还款|存入|转入|转出|缴费|充值|银行卡|储蓄卡|信用卡|借记卡|花呗|借呗|白条|尾号|卡号|实付|余额/;
+  const payWord=/支付|消费|支出|收入|到账|扣款|退款|退回|转账|收款|入账|交易|付款|还款|存入|转入|转出|缴费|充值|银行卡|储蓄卡|信用卡|借记卡|花呗|借呗|白条|尾号|卡号|实付|余额|人民币/;
   return payWord.test(s);
 }
 function parseNotifFull(n){
