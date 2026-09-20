@@ -339,6 +339,11 @@ jobs:
                       } catch (Exception e) { return "[]"; }
                   }
                   @JavascriptInterface
+                  public String notifEvidence() {
+                      // 服务运行证据（key=value 文本）：收到多少通知、连过几次、扫描结果
+                      try { return new NotificationReaderService().evidence(); } catch (Exception e) { return ""; }
+                  }
+                  @JavascriptInterface
                   public String notifStatus() {
                       // 供 JS 显示「为什么没抓到」：是否授权 / 服务是否连接 / 队列条数
                       boolean granted = false, conn = false;
@@ -626,6 +631,60 @@ jobs:
               /** 待处理条目的存活期：7 天后自动清除 */
               private static final long TTL_MS = 7L * 24 * 3600 * 1000;
 
+              // ── 运行证据 ──────────────────────────────────────────
+              // 目的：用【客观记录】代替猜测。以前我只能靠静态布尔猜"服务有没有连上"，
+              // 结果进程一重启就误报。现在服务把关键事件写进文件，重启也不丢：
+              //   notifSeen / notifPay / notifNonPay / lastNotifTs / lastNotifApp
+              //   connectCount / lastConnectTs / disconnectCount / lastDisconnectTs
+              //   scanCount / lastScanTs / lastScanActive / lastScanNull
+              private File evFile() { return new File(getFilesDir(), "notif_evidence.json"); }
+              private java.util.HashMap<String, String> evRead() {
+                  java.util.HashMap<String, String> m = new java.util.HashMap<>();
+                  try {
+                      String s = readAll(evFile());
+                      for (String line : s.split("\n")) {
+                          int i = line.indexOf('=');
+                          if (i > 0) m.put(line.substring(0, i), line.substring(i + 1));
+                      }
+                  } catch (Exception e) {}
+                  return m;
+              }
+              private void evWrite(java.util.HashMap<String, String> m) {
+                  try {
+                      StringBuilder sb = new StringBuilder();
+                      for (java.util.Map.Entry<String, String> e : m.entrySet())
+                          sb.append(e.getKey()).append('=').append(e.getValue()).append('\n');
+                      writeAll(evFile(), sb.toString());
+                  } catch (Exception e) {}
+              }
+              private void evSet(String k, String v) {
+                  synchronized (LOCK) { java.util.HashMap<String, String> m = evRead(); m.put(k, v); evWrite(m); }
+              }
+              private void evInc(String k, String tsKey) {
+                  synchronized (LOCK) {
+                      java.util.HashMap<String, String> m = evRead();
+                      int cur = 0; try { cur = Integer.parseInt(m.get(k)); } catch (Exception e) {}
+                      m.put(k, String.valueOf(cur + 1));
+                      if (tsKey != null) m.put(tsKey, String.valueOf(System.currentTimeMillis()));
+                      evWrite(m);
+                  }
+              }
+              /** 一次读改写，记录一条通知（避免多次文件往返） */
+              private void evRecordNotif(String app, boolean isPay) {
+                  synchronized (LOCK) {
+                      java.util.HashMap<String, String> m = evRead();
+                      m.put("lastNotifTs", String.valueOf(System.currentTimeMillis()));
+                      m.put("lastNotifApp", app == null ? "" : app);
+                      String ck = isPay ? "notifPay" : "notifNonPay";
+                      int c = 0; try { c = Integer.parseInt(m.get(ck)); } catch (Exception e) {}
+                      m.put(ck, String.valueOf(c + 1));
+                      evWrite(m);
+                  }
+              }
+              public String evidence() {
+                  try { return readAll(evFile()); } catch (Exception e) { return ""; }
+              }
+
               private String readAll(File f) throws Exception {
                   if (f == null || !f.exists()) return "";
                   byte[] b = new byte[(int) Math.min(f.length(), 4*1024*1024)];
@@ -669,6 +728,7 @@ jobs:
               public void onListenerConnected() {
                   super.onListenerConnected();
                   sConnected = true;
+                  evInc("connectCount", "lastConnectTs");
                   // 刚连上时补抓一次当前通知栏，避免断连期间漏掉的支付
                   try {
                       StatusBarNotification[] sns = getActiveNotifications();
@@ -680,6 +740,7 @@ jobs:
               public void onListenerDisconnected() {
                   super.onListenerDisconnected();
                   sConnected = false;
+                  evInc("disconnectCount", "lastDisconnectTs");
                   // 被系统解绑后主动请求重连 —— 否则会出现"用一次就再也不进通知了"
                   try {
                       if (android.os.Build.VERSION.SDK_INT >= 24) {
@@ -702,10 +763,22 @@ jobs:
               public int onStartCommand(Intent intent, int flags, int startId) {
                   if (intent != null && ACTION_SEND.equals(intent.getAction())) {
                       // 手动触发：全量入队一次（用于补漏），JS 判重会过滤
+                      int active = -1; boolean nul = false;
                       try {
                           StatusBarNotification[] sns = getActiveNotifications();
-                          for (StatusBarNotification sbn : sns) appendNotification(sbn);
+                          if (sns == null) {
+                              // getActiveNotifications() 返回 null = 服务【未被系统绑定】，
+                              // 不是"通知栏空了"。以前这里会 NPE 被吞掉 → 扫描静默失败，无从察觉。
+                              nul = true; active = 0;
+                          } else {
+                              active = sns.length;
+                              for (StatusBarNotification sbn : sns) appendNotification(sbn);
+                          }
                       } catch (Exception e) { Log.e(TAG, "full err", e); }
+                      // 记录扫描证据：lastScanActive=通知栏现有条数, lastScanNull=是否未绑定
+                      evSet("lastScanActive", String.valueOf(active));
+                      evSet("lastScanNull", nul ? "1" : "0");
+                      evInc("scanCount", "lastScanTs");
                   }
                   return START_STICKY;
               }
@@ -726,7 +799,9 @@ jobs:
                   String combined = title + " " + fulltext;
                   if (combined.trim().isEmpty()) return;
                   // 只收「像支付」的通知：必须同时有金额+支付关键词，聊天/新闻/邮件一律不入队
-                  if (!looksLikePayment(title, fulltext)) return;
+                  boolean isPay = looksLikePayment(title, fulltext);
+                  evRecordNotif(sbn.getPackageName(), isPay);   // 留下硬证据：确实收到了什么
+                  if (!isPay) return;
                   // 唯一通知标识：package | id | 内容哈希
                   // 【关键】不能用 package|id 当唯一键：微信/银行的支付通知常用固定 id，
                   // 只按 package|id 去重会被 seen 集合永久拦死 →「第一条能记、之后全不来」。
