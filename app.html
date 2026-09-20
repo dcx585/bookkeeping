@@ -1367,6 +1367,16 @@ function showImpDiag(){
   st.style.display='block';
   const ev=readEvidence();
   let s='';
+  // 环境自检：系统眼里的"我"到底是什么样（判断"绑不上"是清单问题还是系统问题）
+  try{
+    if(window.MinisBridge && typeof window.MinisBridge.selfCheck==='function'){
+      const c=JSON.parse(window.MinisBridge.selfCheck()||'{}');
+      s+='【环境自检】\n';
+      s+='  · 清单允许系统连接服务(exported)：'+(c.exported==='true'?'✅ 是':'❌ '+(c.exported==='false'?'否 —— 清单写错了，这是绑不上的原因':'读取失败('+c.exported+')'))+'\n';
+      s+='  · 系统「通知使用权」列表含本应用：'+(c.inList?'✅ 是':'❌ 否 —— 需要去设置里打开')+'\n';
+      s+='  · 系统记录的原始值：'+(c.raw?c.raw:'(空)')+'\n\n';
+    }
+  }catch(e){}
   s+='【服务运行证据】（这些是服务自己记的，重启不丢）\n';
   s+='收到通知：支付类 '+Number(ev.notifPay||0)+' 条 / 非支付 '+Number(ev.notifNonPay||0)+' 条\n';
   s+='最近一条：'+(ev.lastNotifTs?(agoText(ev.lastNotifTs)+'（'+(ev.lastNotifApp||'?')+'）'):'从未收到')+'\n';
