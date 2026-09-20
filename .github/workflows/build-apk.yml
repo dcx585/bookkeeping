@@ -359,6 +359,29 @@ jobs:
                       return "{\"granted\":" + granted + ",\"connected\":" + conn + ",\"queue\":" + qn + "}";
                   }
                   @JavascriptInterface
+                  public String selfCheck() {
+                      // 环境自检：把"系统眼里的我"如实报出来，用于定位"绑不上"的真正原因
+                      //   exported: 清单里服务是否允许系统连接（必须 true）
+                      //   inList  : 系统「通知使用权」列表里是否含本应用
+                      //   raw     : 系统记录的原始 enabled_notification_listeners
+                      String exported = "?", inList = "false", raw = "";
+                      try {
+                          android.content.pm.ServiceInfo si = getPackageManager().getServiceInfo(
+                                  new android.content.ComponentName(MainActivity.this, NotificationReaderService.class), 0);
+                          exported = String.valueOf(si.exported);
+                      } catch (Exception e) { exported = "err"; }
+                      try {
+                          raw = android.provider.Settings.Secure.getString(
+                                  getContentResolver(), "enabled_notification_listeners");
+                      } catch (Exception e) { raw = ""; }
+                      if (raw == null) raw = "";
+                      String pkg = getPackageName();
+                      inList = String.valueOf(raw.contains(pkg));
+                      String escd = raw.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ");
+                      return "{\"exported\":\"" + exported + "\",\"inList\":" + inList
+                           + ",\"pkg\":\"" + pkg + "\",\"raw\":\"" + escd + "\"}";
+                  }
+                  @JavascriptInterface
                   public void requestRebind() {
                       mainHandler.post(new Runnable() { public void run() {
                           try {
