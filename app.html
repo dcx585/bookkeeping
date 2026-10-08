@@ -182,7 +182,16 @@ body{
 .acct-item.acct-col{display:block}
 
 /* ── FAB ── */
-.fab{position:fixed;bottom:100px;right:16px;width:52px;height:52px;border-radius:50%;background:var(--accent);color:#fff;font-size:24px;line-height:52px;text-align:center;border:none;cursor:pointer;z-index:100;transition:transform .2s cubic-bezier(.32,.72,0,1),opacity .3s;box-shadow:0 2px 10px rgba(0,0,0,.1)}
+.fab{position:fixed;bottom:100px;right:16px;width:52px;height:52px;border-radius:50%;background:var(--accent);color:#fff;font-size:24px;line-height:52px;text-align:center;border:none;cursor:pointer;z-index:100;transition:transform .2s cubic-bezier(.32,.72,0,1),opacity .3s;box-shadow:0 2px 10px rgba(0,0,0,.1);touch-action:manipulation;-webkit-user-select:none;user-select:none}
+.fab.holding{transform:scale(1.15);background:#e55}
+.fab-hint{position:fixed;bottom:160px;right:16px;z-index:100;background:rgba(0,0,0,.78);color:#fff;font-size:12px;padding:6px 10px;border-radius:8px;opacity:0;pointer-events:none;transition:opacity .15s}
+.fab-hint.show{opacity:1}
+/* 折叠区：把低频功能收起来，别让面板越来越长 */
+.fold-head{display:flex;align-items:center;justify-content:space-between;padding:10px 2px;margin-top:2px;font-size:13px;color:var(--text2);cursor:pointer;border-top:1px solid var(--border)}
+.fold-head .fold-arrow{transition:transform .2s;font-size:12px}
+.fold-head.open .fold-arrow{transform:rotate(180deg)}
+.fold-body{display:none;padding-top:8px}
+.fold-body.show{display:block}
 .fab:active{transform:scale(.94)}
 
 /* ── Bottom bar ── */
@@ -320,7 +329,9 @@ input[type=checkbox]{accent-color:var(--accent)}
   </div>
 </div>
 
-<div class="fab" id="fab" onclick="openTxModal()">+</div>
+<!-- FAB：单击=记一笔；长按=导入通知（省掉"更多→导入通知"两步） -->
+<div class="fab" id="fab">+</div>
+<div class="fab-hint" id="fabHint">松手进入导入</div>
 
 <div class="modal" id="txModal">
   <div class="sheet">
@@ -368,20 +379,26 @@ input[type=checkbox]{accent-color:var(--accent)}
 
 <div class="modal" id="moreModal">
   <div class="sheet"><h3>更多</h3>
-    <div style="display:flex;flex-direction:column;gap:6px">
-      <button class="cancel-btn" onclick="openCalc();closeMore()" style="margin:0">🧮 计算器</button>
-      <button class="cancel-btn" onclick="openBgModal();closeMore()" style="margin:0">🖼 背景</button>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      <button class="cancel-btn" onclick="openImportNotify();closeMore()" style="margin:0">📲 导入通知</button>
+      <button class="cancel-btn" onclick="openRecon();closeMore()" style="margin:0">⚖️ 余额对账</button>
       <button class="cancel-btn" onclick="openBudgetSettings();closeMore()" style="margin:0">📊 预算设置</button>
       <button class="cancel-btn" onclick="backupData();closeMore()" style="margin:0">💾 备份</button>
-      <button class="cancel-btn" onclick="restoreData();closeMore()" style="margin:0">📥 恢复</button>
-      <button class="cancel-btn" onclick="openExportCSV();closeMore()" style="margin:0">📤 导出CSV</button>
-      <button class="cancel-btn" onclick="importCSV();closeMore()" style="margin:0">📥 导入CSV</button>
-      <button class="cancel-btn" onclick="importFromClipboard();closeMore()" style="margin:0">📋 从剪贴板导入</button>
-      <button class="cancel-btn" onclick="openImportNotify();closeMore()" style="margin:0">📲 导入通知</button>
-      <button class="cancel-btn" onclick="openRecon();closeMore()" style="margin:0">⚖️ 余额对账（查漏记）</button>
-      <button class="cancel-btn" onclick="openSnapshots();closeMore()" style="margin:0">🛟 数据快照（改坏了可回退）</button>
     </div>
-    <button class="cancel-btn" onclick="closeMore()" style="margin-top:8px">关闭</button>
+    <div class="fold-head" onclick="exFold(this,'moreFold')"><span>其余功能</span><span class="fold-arrow">▾</span></div>
+    <div class="fold-body" id="moreFold">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <button class="cancel-btn" onclick="openCalc();closeMore()" style="margin:0">🧮 计算器</button>
+        <button class="cancel-btn" onclick="openBgModal();closeMore()" style="margin:0">🖼 背景</button>
+        <button class="cancel-btn" onclick="openExportCSV();closeMore()" style="margin:0">📤 导出CSV</button>
+        <button class="cancel-btn" onclick="importCSV();closeMore()" style="margin:0">📥 导入CSV</button>
+        <button class="cancel-btn" onclick="importFromClipboard();closeMore()" style="margin:0">📋 剪贴板导入</button>
+        <button class="cancel-btn" onclick="restoreData();closeMore()" style="margin:0">📥 恢复备份</button>
+        <button class="cancel-btn" onclick="openSnapshots();closeMore()" style="margin:0">🛟 数据快照</button>
+        <button class="cancel-btn" onclick="openSearch();closeMore()" style="margin:0">🔍 搜索</button>
+      </div>
+    </div>
+    <button class="cancel-btn" onclick="closeMore()" style="margin-top:10px">关闭</button>
   </div>
 </div>
 
@@ -1246,6 +1263,55 @@ function calcTransfer(){closeCalc();openTxModal(null,'transfer')}
 function openMore(){document.getElementById('moreModal').classList.add('show')}
 function closeMore(){document.getElementById('moreModal').classList.remove('show')}
 
+// 折叠区开关（更多菜单里收低频功能用）
+function exFold(head,bodyId){
+  const b=document.getElementById(bodyId);
+  if(!b) return;
+  const on=b.classList.toggle('show');
+  head.classList.toggle('open',on);
+}
+
+// ── FAB 长按快捷：单击=记一笔，长按=导入通知 ──
+// 原来「导入通知」要点 3 次（更多 → 导入通知 → 扫描），这是高频操作，太深了。
+(function bindFab(){
+  function init(){
+    const fab=document.getElementById('fab');
+    const hint=document.getElementById('fabHint');
+    if(!fab||fab.__bound) return; fab.__bound=true;
+    let timer=null, held=false, startX=0, startY=0;
+    const HOLD=420;                       // 长按阈值(ms)
+    function clear(){ if(timer){clearTimeout(timer);timer=null} fab.classList.remove('holding'); if(hint) hint.classList.remove('show'); }
+    function down(e){
+      const p=(e.touches&&e.touches[0])||e;
+      startX=p.clientX||0; startY=p.clientY||0;
+      held=false;
+      timer=setTimeout(()=>{ held=true; fab.classList.add('holding'); if(hint) hint.classList.add('show'); },HOLD);
+    }
+    function move(e){
+      // 手指滑动超过 12px 视为滚动/误触，取消长按
+      const p=(e.touches&&e.touches[0])||e;
+      if(Math.abs((p.clientX||0)-startX)>12||Math.abs((p.clientY||0)-startY)>12) clear();
+    }
+    function up(e){
+      const wasHeld=held; clear();
+      if(wasHeld){ try{ openImportNotify(); }catch(err){ ts('打开失败'); } }
+      else { try{ openTxModal(); }catch(err){} }
+    }
+    fab.addEventListener('touchstart',down,{passive:true});
+    fab.addEventListener('touchmove',move,{passive:true});
+    fab.addEventListener('touchend',up);
+    fab.addEventListener('touchcancel',clear);
+    // 桌面/鼠标环境
+    fab.addEventListener('mousedown',down);
+    fab.addEventListener('mousemove',move);
+    fab.addEventListener('mouseup',up);
+    fab.addEventListener('mouseleave',clear);
+    fab.addEventListener('contextmenu',ev=>ev.preventDefault());
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init);
+  else init();
+})();
+
 // ── Background stored in IndexedDB (no size limit) ──
 function bgDB(){return new Promise((r,j)=>{const q=indexedDB.open('minis_bg',1);q.onupgradeneeded=()=>q.result.createObjectStore('bg');q.onsuccess=()=>r(q.result);q.onerror=()=>j(q.error)})}
 async function saveBg(img,fit,color,overlay){const d=await bgDB();const t=d.transaction('bg','readwrite');const s=t.objectStore('bg');s.put(img,'img');s.put(fit,'fit');s.put(color,'color');s.put(overlay,'overlay');return new Promise(r=>{t.oncomplete=r})}
@@ -1584,14 +1650,21 @@ function refreshImpStatus(){
     need=true;
     msg='服务已连上但还没收到过任何通知。若明明有通知却一直为空，请给「记账」打开「后台高耗电」「允许自启动」。';
   } else if(granted && ev.lastNotifTs && (Date.now()-Number(ev.lastNotifTs))>2*3600*1000){
-    // ★ 关键一档：服务曾经连过、也收到过通知，但【很久没动静了】。
-    //   手机天天有通知，超过 2 小时没收到 = 服务被系统冻结了（国产ROM 常见）。
-    //   这不是代码问题，必须用户去开后台保活。
-    need=true;
-    msg='通知服务已停摆 '+agoText(ev.lastNotifTs)+'（手机天天有通知，不该这么久没动静）——'
-       +'系统在后台把「记账」冻结了，通知收不到。\n请到 系统设置 里给「记账」打开：\n'
-       +'  · 后台高耗电 / 允许后台运行\n  · 自启动\n  · 电池 → 不受限制\n'
-       +'设置后回到本页点「重连通知服务」。'
+    // ★ 修（2026-10-08）：这一档原来【只看"超过2小时没收到通知"就报警】，
+    //   但用户【没付款的时候本来就不会有支付通知】——
+    //   结果晚上不买东西就一直误报"服务停摆了"，用户跑去改系统设置也没用
+    //   （因为根本不是那个问题），点「重连」也不会消失（时间戳没更新）。
+    //
+    //   改为：必须【有实证】才报——判断依据是"主动扫描通知栏返回 0 条"，
+    //   即：通知栏里明明有东西，而服务读不到 → 才是真的没绑上。
+    //   单纯"2小时没动静"不再报警（那是正常作息，不是故障）。
+    const scanNull = (ev.lastScanNull === '1');
+    const scanZero = (ev.lastScanTs && Number(ev.lastScanActive) === 0);
+    if (scanNull || scanZero) {
+      need = true;
+      msg = '服务可能已和系统断开（主动扫描通知栏读到 0 条，但通知栏里应该有通知）——\n'
+          + '点「重连通知服务」；若无效，去「通知设置」把「记账」的开关【关掉 → 等5秒 → 再打开】。';
+    }
   }
   hint.style.display=need?'block':'none';
   if(need){
@@ -1604,6 +1677,11 @@ function refreshImpStatus(){
 function reconnectNotif(){
   if(window.MinisBridge && typeof window.MinisBridge.requestRebind==='function'){
     try{ window.MinisBridge.requestRebind(); }catch(e){}
+  }
+  // ★ 重连后立刻主动扫一次通知栏，并把结果写进证据，
+  //   这样红框能【即时反映真实状态】，不会像以前那样"点了也不消失"。
+  if(window.MinisBridge && typeof window.MinisBridge.triggerScan==='function'){
+    try{ window.MinisBridge.triggerScan(); }catch(e){}
   }
   ts('已请求重连，2秒后自动重新检测…');
   setTimeout(()=>{ refreshImpStatus(); doImportScan(); }, 2000);
