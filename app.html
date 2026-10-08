@@ -200,9 +200,12 @@ body{
 .bottom-bar button:active{background:var(--bg)}
 
 /* ── Modals ── */
-.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:200;align-items:flex-end;justify-content:center;backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}
+.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:200;align-items:flex-end;justify-content:center;backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);overflow:hidden}
 .modal.show{display:flex}
-.sheet{background:var(--surface);width:100%;max-width:420px;border-radius:18px 18px 0 0;padding:24px 20px calc(max(32px, env(safe-area-inset-bottom)) + var(--kb, 0px));animation:slideUp .35s cubic-bezier(.16,1,.3,1);transition:padding-bottom .15s}
+/* ★ 弹层可滚动（2026-10-08）：原来 .sheet 没有高度上限、也没有 overflow，
+   内容一长（比如「诊断」那一屏长文）超出屏幕的部分就被裁掉且【滑不动】，
+   用户根本看不到。现在限制最大高度并允许纵向滚动，任何弹层都能滑到底。 */
+.sheet{background:var(--surface);width:100%;max-width:420px;border-radius:18px 18px 0 0;padding:24px 20px calc(max(32px, env(safe-area-inset-bottom)) + var(--kb, 0px));animation:slideUp .35s cubic-bezier(.16,1,.3,1);transition:padding-bottom .15s;max-height:92vh;max-height:92dvh;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
 .sheet h3{font-size:16px;font-weight:600;text-align:center;margin-bottom:20px;color:var(--text)}
 .type-switch{display:flex;gap:0;background:var(--bg);border-radius:10px;padding:3px;margin-bottom:18px}
@@ -329,8 +332,8 @@ input[type=checkbox]{accent-color:var(--accent)}
   </div>
 </div>
 
-<!-- FAB：单击=记一笔；长按=导入通知（省掉"更多→导入通知"两步） -->
-<div class="fab" id="fab">+</div>
+<!-- FAB：单击=记一笔（走内联 onclick，最可靠）；长按=导入通知 -->
+<div class="fab" id="fab" onclick="openTxModal()">+</div>
 <div class="fab-hint" id="fabHint">松手进入导入</div>
 
 <div class="modal" id="txModal">
@@ -427,8 +430,10 @@ input[type=checkbox]{accent-color:var(--accent)}
     <div style="font-size:11px;color:var(--text2);text-align:center;margin:-6px 0 8px">只放纯支付信息 · 已记账的自动删 · 清除的留 7 天可恢复</div>
     <div id="impStatusLine" style="font-size:11px;color:var(--text2);text-align:center;margin-bottom:8px"></div>
     <div id="impConnHint" style="display:none;background:rgba(229,85,85,.08);border:1px solid rgba(229,85,85,.3);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12px;color:#e55;line-height:1.5"></div>
-    <div id="importNotifyStatus" style="text-align:center;color:var(--text2);padding:16px 0;font-size:14px">点击扫描，从通知/短信收取支付信息</div>
-    <div id="importNotifyList" style="max-height:44vh;overflow-y:auto;margin-bottom:10px"></div>
+    <!-- ★ 诊断/全量分析的输出塞在这里，内容很长 → 必须能滚动，否则看不全。
+         注意：不要用 text-align:left 覆盖 —— 短提示需要居中，长文靠左是 JS 里另行设置的。 -->
+    <div id="importNotifyStatus" style="text-align:center;color:var(--text2);padding:16px 0;font-size:14px;max-height:50vh;overflow-y:auto;-webkit-overflow-scrolling:touch;white-space:pre-wrap;word-break:break-word">点击扫描，从通知/短信收取支付信息</div>
+    <div id="importNotifyList" style="max-height:44vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-bottom:10px"></div>
     <button class="submit" onclick="doImportScan()">🔍 扫描（通知+短信）</button>
     <button class="submit" id="importConfirmBtn" onclick="doImportConfirm()" style="display:none">✓ 确认入账</button>
     <button class="cancel-btn" onclick="analyzeAll()" style="margin-top:4px;font-size:12px;opacity:.7">全量分析（哪些没识别到）</button>
@@ -1271,41 +1276,53 @@ function exFold(head,bodyId){
   head.classList.toggle('open',on);
 }
 
-// ── FAB 长按快捷：单击=记一笔，长按=导入通知 ──
-// 原来「导入通知」要点 3 次（更多 → 导入通知 → 扫描），这是高频操作，太深了。
+// ── FAB 长按快捷：单击=记一笔（内联 onclick 负责），长按=导入通知 ──
+// 注意：单击【不再】由这里处理，交给元素的 onclick，保证最可靠。
+// 这里只负责"长按"这一件事，并在长按时阻止随后的 click 触发。
 (function bindFab(){
   function init(){
     const fab=document.getElementById('fab');
     const hint=document.getElementById('fabHint');
     if(!fab||fab.__bound) return; fab.__bound=true;
-    let timer=null, held=false, startX=0, startY=0;
-    const HOLD=420;                       // 长按阈值(ms)
-    function clear(){ if(timer){clearTimeout(timer);timer=null} fab.classList.remove('holding'); if(hint) hint.classList.remove('show'); }
+    let timer=null, held=false, startX=0, startY=0, moved=false;
+    const HOLD=450;                       // 长按阈值(ms)
+    function reset(){
+      if(timer){clearTimeout(timer);timer=null}
+      fab.classList.remove('holding');
+      if(hint) hint.classList.remove('show');
+    }
     function down(e){
       const p=(e.touches&&e.touches[0])||e;
       startX=p.clientX||0; startY=p.clientY||0;
-      held=false;
+      held=false; moved=false;
       timer=setTimeout(()=>{ held=true; fab.classList.add('holding'); if(hint) hint.classList.add('show'); },HOLD);
     }
     function move(e){
-      // 手指滑动超过 12px 视为滚动/误触，取消长按
       const p=(e.touches&&e.touches[0])||e;
-      if(Math.abs((p.clientX||0)-startX)>12||Math.abs((p.clientY||0)-startY)>12) clear();
+      if(Math.abs((p.clientX||0)-startX)>12||Math.abs((p.clientY||0)-startY)>12){ moved=true; reset(); }
     }
     function up(e){
-      const wasHeld=held; clear();
-      if(wasHeld){ try{ openImportNotify(); }catch(err){ ts('打开失败'); } }
-      else { try{ openTxModal(); }catch(err){} }
+      const wasHeld=held;
+      reset();
+      if(wasHeld){
+        // 长按成功 → 进导入，并吃掉这次 click（防止顺带又开"记一笔"）
+        if(e&&e.cancelable) e.preventDefault();
+        held=false; moved=false;
+        fab.__eatingClick=true;
+        setTimeout(()=>{ fab.__eatingClick=false; },600);
+        try{ openImportNotify(); }catch(err){ ts('打开失败'); }
+      }
     }
     fab.addEventListener('touchstart',down,{passive:true});
     fab.addEventListener('touchmove',move,{passive:true});
     fab.addEventListener('touchend',up);
-    fab.addEventListener('touchcancel',clear);
-    // 桌面/鼠标环境
+    fab.addEventListener('touchcancel',reset);
     fab.addEventListener('mousedown',down);
     fab.addEventListener('mousemove',move);
     fab.addEventListener('mouseup',up);
-    fab.addEventListener('mouseleave',clear);
+    fab.addEventListener('mouseleave',reset);
+    // 长按后吞掉随后的 click
+    fab.addEventListener('click',function(e){ if(fab.__eatingClick){ e.stopImmediatePropagation(); e.preventDefault(); } },true);
     fab.addEventListener('contextmenu',ev=>ev.preventDefault());
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init);
@@ -1717,7 +1734,7 @@ function selfTestParse(){
   out+='\n合计：✅ '+okN+' 项正常'+(badN?('，❌ '+badN+' 项有问题 —— 请把本屏截图发我'):'（全部正常）');
   const st=document.getElementById('importNotifyStatus');
   st.style.display='block';
-  st.textContent=out;
+  st.style.textAlign='left';st.textContent=out;
   document.getElementById('importNotifyList').innerHTML='';
   return out;
 }
@@ -1779,7 +1796,7 @@ function analyzeAll(){
   }
   const st=document.getElementById('importNotifyStatus');
   st.style.display='block';
-  st.textContent=out;
+  st.style.textAlign='left';st.textContent=out;
   document.getElementById('importNotifyList').innerHTML='';
   return out;
 }
@@ -1813,7 +1830,7 @@ function showImpDiag(){
   s+='\n\n【短信共 '+__impRaw.nSms+' 条，近7天 '+__impRaw.nRecent+' 条，原文样本】';
   s+= __impRaw.sms.length ? ('\n'+__impRaw.sms.join('\n'))
                           : '\n(空 —— 未授权读取短信，或短信库为空)';
-  st.textContent=s;
+  st.style.textAlign='left';st.textContent=s;
 }
 
 // ── 待处理框 Payment Inbox ──────────────────────────────
@@ -2002,8 +2019,8 @@ function renderImpList(){
   if(impTx.length){ st.style.display='none'; cb.style.display='block'; }
   else{
     st.style.display='block'; cb.style.display='none';
-    if(dis.length) st.textContent='框中暂无待入账支付信息（下方为已清除留存）。';
-    else if(alog.length) st.textContent='框中暂无待确认的支付（下方是已自动入账的记录）。';
+    if(dis.length){st.style.textAlign='center';st.textContent='框中暂无待入账支付信息（下方为已清除留存）。'}
+    else if(alog.length){st.style.textAlign='center';st.textContent='框中暂无待确认的支付（下方是已自动入账的记录）。'}
     else st.textContent = window.__impDiag||'未发现支付信息。请保留银行/微信/支付宝的支付通知或短信后重新扫描。';
   }
 }
@@ -2106,7 +2123,7 @@ function X_isRecharge(e){ return isRechargeItem(e); }
 function X_isBank(e){ return isBankItem(e); }
 async function doImportScan(){
   const st=document.getElementById('importNotifyStatus');
-  st.style.display='block'; st.textContent='扫描中...';
+  st.style.display='block'; st.style.textAlign='center'; st.textContent='扫描中...';
   document.getElementById('importConfirmBtn').style.display='none';
   impTx=[]; window.__impDiag='';
   try{
@@ -2247,7 +2264,7 @@ async function doImportScan(){
         else if(ev.lastScanNull==='1') why='\n⚠ 服务未被系统绑定（扫描通知栏返回空）→ 点上面「重连通知服务」。';
         else if(!ev.lastNotifTs) why='\n⚠ 服务已连上但从未收到通知。若确实有支付通知，请在系统设置给「记账」开「后台高耗电/自启动」。';
       }catch(e){}
-      st.textContent=window.__impDiag+why+'\n没有可入账的支付信息。保留支付通知/短信后重新扫描。';
+      st.style.textAlign='left';st.textContent=window.__impDiag+why+'\n没有可入账的支付信息。保留支付通知/短信后重新扫描。';
       document.getElementById('importNotifyList').innerHTML='';
       return;
     }
