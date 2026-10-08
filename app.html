@@ -379,8 +379,21 @@ input[type=checkbox]{accent-color:var(--accent)}
       <button class="cancel-btn" onclick="importFromClipboard();closeMore()" style="margin:0">📋 从剪贴板导入</button>
       <button class="cancel-btn" onclick="openImportNotify();closeMore()" style="margin:0">📲 导入通知</button>
       <button class="cancel-btn" onclick="openRecon();closeMore()" style="margin:0">⚖️ 余额对账（查漏记）</button>
+      <button class="cancel-btn" onclick="openSnapshots();closeMore()" style="margin:0">🛟 数据快照（改坏了可回退）</button>
     </div>
     <button class="cancel-btn" onclick="closeMore()" style="margin-top:8px">关闭</button>
+  </div>
+</div>
+
+<div class="modal" id="snapModal">
+  <div class="sheet"><h3>数据快照</h3>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.6">
+      每次改动数据前，系统会<b>自动</b>把当时的账本存一份（保留最近 7 份）。<br>
+      万一某次更新把数据搞乱了，从这里<b>一键回退</b>即可。
+    </div>
+    <div id="snapList" style="max-height:46vh;overflow-y:auto;margin-bottom:10px"></div>
+    <button class="submit" onclick="restoreLatestSnapshot()">↩ 恢复到最近一份</button>
+    <button class="cancel-btn" onclick="document.getElementById('snapModal').classList.remove('show')">关闭</button>
   </div>
 </div>
 
@@ -563,21 +576,157 @@ const CC={'餐饮':'#c0392b','购物':'#b8943e','交通':'#5b9eb5','固定支出
 function cc(c){return CC[(c||'其他').split('/')[0]]||'#'+Math.floor(Math.abs(hash(c))*16777215).toString(16)}
 function hash(s){let h=0;for(let i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0}return h}
 const CK='minis_cat_v1';
-function gc(type){return JSON.parse(localStorage.getItem(CK+'_'+type)||'[]')}
-function sc(type,d){localStorage.setItem(CK+'_'+type,JSON.stringify(d))}
+function gc(type){return safeRead(CK+'_'+type,[])}
+function sc(type,d){safeWrite(()=>localStorage.setItem(CK+'_'+type,JSON.stringify(d)))}
 let cid=Date.now();function uid(){cid++;return cid.toString(36)+Math.random().toString(36).slice(2,6)}
-function atx(){return JSON.parse(localStorage.getItem(SK)||'[]')}
-function stx(d){localStorage.setItem(SK,JSON.stringify(d))}
-function gb(){return JSON.parse(localStorage.getItem(BK)||'{}')}
-function sb(d){localStorage.setItem(BK,JSON.stringify(d))}
-function ga(){return JSON.parse(localStorage.getItem(AK)||JSON.stringify(DA))}
-function sa(d){localStorage.setItem(AK,JSON.stringify(d))}
+function atx(){return safeRead(SK,[])}
+
+// ══════════════════════════════════════════════════════════════
+// 数据安全网（2026-10-08）
+// 为什么需要：CI/测试只能保证"代码逻辑没变"，保证不了"你的账本没被写坏"。
+// 代码回滚 git checkout 就完事；数据被覆盖是不可逆的。
+// 这一层是唯一能兜住"改 A 破坏 B 把用户流水写没了"的手段。
+// ══════════════════════════════════════════════════════════════
+const SCHEMA_VERSION = 2;            // 数据格式版本号：改数据结构的每次都要 +1
+const SNAP_PREFIX    = 'minis_snap_';
+const SNAP_KEEP      = 7;            // 保留最近 7 份快照
+const VK_SUFFIX      = '_v';         // 存各 key 的 schemaVersion
+
+// 受保护的数据 key（用户真正的资产：流水/预算/账户/理财）
+function protectedKeys(){ return [SK,BK,AK,IK,CK+'_expense',CK+'_income']; }
+
+// ── ① 写前快照：任何一次写入前，先把【当前状态】存一份 ──
+// 返回 true=确实存了快照，false=没有可存的东西（首次写入）
+function snapshotBeforeWrite(){
+  try{
+    const dump={}; let has=false;
+    protectedKeys().forEach(k=>{ const v=localStorage.getItem(k); if(v!=null){dump[k]=v;has=true} });
+    // 首次写入：没有旧数据可丢 → 不拍快照。
+    // ★ 关键：必须显式返回 false，让 safeWrite 不要把这个"空操作"当成
+    //   "已经拍过了"而锁上 800ms —— 否则紧接着的第二笔写入（真正的第一次可回退点）
+    //   会被 __snapOpen 挡掉，导致用户永远没有快照可用。
+    if(!has) return false;
+    const ts=Date.now();
+    localStorage.setItem(SNAP_PREFIX+ts, JSON.stringify({ts:ts,schemaVersion:SCHEMA_VERSION,data:dump}));
+    // 只留最近 SNAP_KEEP 份，别把 localStorage 撑爆
+    const all=Object.keys(localStorage).filter(k=>k.indexOf(SNAP_PREFIX)===0).sort();
+    while(all.length>SNAP_KEEP) localStorage.removeItem(all.shift());
+    return true;
+  }catch(e){ return false; }   // 快照失败绝不能阻塞正常写入
+}
+// 同一次"用户操作"内的连写只拍一张（否则 7 份快照全是同一状态）
+let __snapOpen=false, __snapTimer=null;
+function safeWrite(fn){
+  // 只有【本次真的拍下了快照】才锁窗口。
+  // 首次写入没有旧数据 → snapshotBeforeWrite 返回 false → 不锁，
+  // 这样紧接着的第二笔仍然能拍到快照（否则用户永远没得回退）。
+  const took = snapshotBeforeWrite();
+  if(took){
+    __snapOpen = true;
+    if(__snapTimer) clearTimeout(__snapTimer);
+    __snapTimer=setTimeout(()=>{__snapOpen=false},800);   // 800ms 内的连写算一次操作
+  }
+  // 注意：不做"未拍也锁"的处理 —— 未拍说明本来就没数据可丢，不该挡住下一次
+  try{ return fn(); }catch(e){ ts('保存失败：'+e.message); throw e; }
+}
+
+// ── ② 安全读取：解析失败绝不清空重来（那才是真正的数据事故）──
+//    改为：把坏数据隔离到 _CORRUPT_<ts>，返回 fallback，并立即可见地提示用户
+function safeRead(key,fallback){
+  const raw=localStorage.getItem(key);
+  if(raw==null) return fallback;
+  try{
+    const v=JSON.parse(raw);
+    if(v==null) return fallback;
+    return v;
+  }catch(e){
+    // 隔离坏数据（不删！），让用户还有机会找回
+    try{ localStorage.setItem(key+'_CORRUPT_'+Date.now(), raw); }catch(_){}
+    try{ ts('⚠ 本地数据读取异常，已隔离保存。请到「更多 → 备份/恢复」找回，不要重新记账！'); }catch(_){}
+    return fallback;
+  }
+}
+
+// ── ③ 恢复：一键回到最近一次快照 ──
+function listSnapshots(){
+  return Object.keys(localStorage).filter(k=>k.indexOf(SNAP_PREFIX)===0)
+    .map(k=>({key:k,ts:Number(k.slice(SNAP_PREFIX.length))}))
+    .filter(x=>x.ts>0).sort((a,b)=>b.ts-a.ts);
+}
+function openSnapshots(){
+  const snaps=listSnapshots();
+  const el=document.getElementById('snapList');
+  const cur=(()=>{ try{ const a=atx(); return Array.isArray(a)?a.length:0; }catch(e){ return 0; } })();
+  let html='<div style="font-size:12px;color:var(--text2);padding:6px 0;border-bottom:1px solid var(--border)">当前账本：<b>'+cur+' 笔</b></div>';
+  if(!snaps.length){
+    html+='<div style="font-size:13px;color:var(--text2);padding:12px 0">还没有快照。记一次账就会自动生成第一份。</div>';
+  }else{
+    snaps.forEach(function(s){
+      const rec=safeRead(s.key,null);
+      let n='?';
+      try{ if(rec&&rec.data&&rec.data[SK]) n=JSON.parse(rec.data[SK]).length; }catch(e){}
+      html+='<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">'
+        +'<span style="flex:1;font-size:13px">'+new Date(s.ts).toLocaleString()+'</span>'
+        +'<span style="font-size:12px;color:var(--text2)">'+n+' 笔</span>'
+        +'<button onclick="restoreSnapshot(\''+s.ts+'\')" style="background:none;border:1px solid var(--border);border-radius:6px;font-size:12px;padding:3px 8px;cursor:pointer;color:var(--accent)">恢复</button>'
+        +'</div>';
+    });
+  }
+  el.innerHTML=html;
+  document.getElementById('snapModal').classList.add('show');
+}
+function restoreSnapshot(tsv){
+  const rec=safeRead(SNAP_PREFIX+tsv,null);
+  if(!rec||!rec.data){ try{ts('快照已损坏')}catch(e){alert('快照已损坏')} return; }
+  const when=new Date(rec.ts).toLocaleString();
+  if(!confirm('恢复到 '+when+' 的状态？\\n（当前数据会先另存一份）')) return;
+  snapshotBeforeWrite();
+  Object.keys(rec.data).forEach(function(k){ localStorage.setItem(k,rec.data[k]); });
+  try{ts('已恢复到 '+when)}catch(e){}
+  location.reload();
+}
+
+function restoreLatestSnapshot(){
+  const snaps=listSnapshots();
+  if(!snaps.length){ ts('还没有快照可用'); return false; }
+  const rec=safeRead(snaps[0].key,null);
+  if(!rec||!rec.data){ ts('快照已损坏'); return false; }
+  const when=new Date(rec.ts).toLocaleString();
+  if(!confirm('恢复到 '+when+' 的状态？\n（当前数据会先另存一份快照）')) return false;
+  snapshotBeforeWrite();                 // 覆盖前再存一次，避免"恢复错了回不来"
+  Object.keys(rec.data).forEach(k=>localStorage.setItem(k,rec.data[k]));
+  ts('已恢复到 '+when);
+  location.reload();
+  return true;
+}
+
+// ── ④ 迁移（纯函数，不碰 localStorage，便于测试）──
+function migrateTx(arr,fromV){
+  let out=arr;
+  if(fromV<2){
+    // v1→v2：补齐 id（旧数据没 id 会导致去重/删除失效）
+    const seen=new Set();
+    out=out.map((t,i)=>{
+      let id=t.id||('m'+(t.time||'')+'_'+i);
+      if(seen.has(id)) id=id+'_'+i;
+      seen.add(id);
+      return Object.assign({},t,{id:id});
+    });
+  }
+  return out;
+}
+
+function stx(d){safeWrite(()=>localStorage.setItem(SK,JSON.stringify(d)))}
+function gb(){return safeRead(BK,{})}
+function sb(d){safeWrite(()=>localStorage.setItem(BK,JSON.stringify(d)))}
+function ga(){return safeRead(AK,DA)}
+function sa(d){safeWrite(()=>localStorage.setItem(AK,JSON.stringify(d)))}
 function mtx(){return atx().filter(t=>t.time.slice(0,7)===cm).sort((a,b)=>b.time.localeCompare(a.time))}
 
 // ── Investment accounts ──
 const DI=[{name:'场内-我的',amount:0,month:'',ours:true},{name:'场外-我的',amount:0,month:'',ours:true},{name:'场外-别人的',amount:0,month:'',ours:false}];
-function gi(){return JSON.parse(localStorage.getItem(IK)||JSON.stringify(DI))}
-function si(d){localStorage.setItem(IK,JSON.stringify(d))}
+function gi(){return safeRead(IK,DI)}
+function si(d){safeWrite(()=>localStorage.setItem(IK,JSON.stringify(d)))}
 let invEditName='';
 function openInvEdit(name){
   invEditName=name;const a=gi().find(x=>x.name===name);
@@ -1176,10 +1325,16 @@ async function restoreBg(){
   document.getElementById('bgFile').value='';
   ts('已恢复');
 }
-function backupData(){loadBgData().then(bg=>{const d={tx:atx(),budget:gb(),accts:ga(),inv:gi(),cats:{expense:gc('expense'),income:gc('income')},bg:bg};const json=JSON.stringify(d);const fn='记账备份_'+new Date().toISOString().slice(0,10)+'.json';
+function backupData(){loadBgData().then(bg=>{const d={schemaVersion:SCHEMA_VERSION,exportedAt:new Date().toISOString(),tx:atx(),budget:gb(),accts:ga(),inv:gi(),cats:{expense:gc('expense'),income:gc('income')},bg:bg};const json=JSON.stringify(d);const fn='记账备份_'+new Date().toISOString().slice(0,10)+'.json';
   if(window.MinisBridge&&typeof window.MinisBridge.saveText==='function'){window.MinisBridge.saveText(fn,json);ts('已保存到 下载/'+fn)}
   else{const b=new Blob([json],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=fn;a.click();URL.revokeObjectURL(a.href);ts('已下载完整备份')}})}
-function restoreData(){const i=document.createElement('input');i.type='file';i.accept='.json';i.onchange=function(){const f=i.files[0];if(!f)return;const r=new FileReader();r.onload=async function(){try{const d=JSON.parse(r.result);if(d.tx){const cur=atx(),ids=new Set(cur.map(t=>t.id));let added=0;d.tx.forEach(t=>{if(!ids.has(t.id)){cur.push(t);ids.add(t.id);added++}});stx(cur)}if(d.budget)sb(d.budget);if(d.accts)sa(d.accts);if(d.inv)si(d.inv);if(d.cats&&d.cats.expense)sc('expense',d.cats.expense);if(d.cats&&d.cats.income)sc('income',d.cats.income);if(d.bg&&d.bg.img){await saveBg(d.bg.img,d.bg.fit||'cover',d.bg.color||'',d.bg.overlay??20)}else await delBg();location.reload()}catch(e){ts('无效备份')}};r.readAsText(f)};i.click()}
+function restoreData(){const i=document.createElement('input');i.type='file';i.accept='.json';i.onchange=function(){const f=i.files[0];if(!f)return;const r=new FileReader();r.onload=async function(){try{const d=JSON.parse(r.result);
+  // ★ 导入前先拍快照 —— 导入是最容易覆盖数据的操作
+  snapshotBeforeWrite();
+  // 版本兼容：来自更新版本的备份先拒绝；来自旧版本的先迁移
+  if(d.schemaVersion>SCHEMA_VERSION){ts('备份来自更新的版本，请先升级 App');return}
+  const dtx=migrateTx(d.tx||[],d.schemaVersion||1);
+  if(d.tx){const cur=atx(),ids=new Set(cur.map(t=>t.id));let added=0;dtx.forEach(t=>{if(!ids.has(t.id)){cur.push(t);ids.add(t.id);added++}});stx(cur)}if(d.budget)sb(d.budget);if(d.accts)sa(d.accts);if(d.inv)si(d.inv);if(d.cats&&d.cats.expense)sc('expense',d.cats.expense);if(d.cats&&d.cats.income)sc('income',d.cats.income);if(d.bg&&d.bg.img){await saveBg(d.bg.img,d.bg.fit||'cover',d.bg.color||'',d.bg.overlay??20)}else await delBg();location.reload()}catch(e){ts('无效备份')}};r.readAsText(f)};i.click()}
 function importCSV(){
   const i=document.createElement('input');i.type='file';i.accept='.csv,.txt';
   i.onchange=function(){
