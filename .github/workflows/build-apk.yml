@@ -7,6 +7,7 @@ on:
     paths:
       - 'app.html'
       - '.github/workflows/build-apk.yml'
+      - 'tools/**'          # ★ 新增：门禁脚本本身变了也要重跑（否则"偷偷放宽门禁"不会被发现）
 
 jobs:
   build:
@@ -730,7 +731,7 @@ jobs:
                   }
                   return out;
               }
-private static void queueAppend(File dir, String entry) {
+              private static void queueAppend(File dir, String entry) {
                   synchronized (LOCK) {
                       File qf = qfOf(dir);
                       String pending = readText(qf).trim();

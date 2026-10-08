@@ -1,0 +1,24 @@
+#!/bin/sh
+# ═════════════════════════════════════════════════════════════
+# pre-push —— 最后一道本地闸门。比 pre-commit 慢，所以放在这里跑全套。
+#
+# 为什么 pre-commit 之外还要 pre-push：
+#   pre-commit 可以 --no-verify 跳过、可以直接 `git commit -am` 加上
+#   「先提交一堆 WIP 再改回来」的工作流。pre-push 是"要出门了"的检查点，
+#   此时跑全套代价可接受，而拦下来的收益最大（推到 GitHub 会触发构建/发布）。
+# ═════════════════════════════════════════════════════════════
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+cd "$ROOT" || exit 0
+
+echo "▸ pre-push: 全套回归门禁（推送前最后检查）"
+if [ "${FORCE:-0}" = "1" ]; then
+  sh tools/check.sh || echo "  ⚠ 有失败但 FORCE=1，继续推送"
+else
+  sh tools/check.sh || {
+    echo ""
+    echo "  ⛔ 门禁未通过，推送已阻止。"
+    echo "     修好再推；确要绕过: git push --no-verify"
+    exit 1
+  }
+fi
+exit 0
