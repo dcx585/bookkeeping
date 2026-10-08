@@ -51,6 +51,7 @@ let m;while((m=re.exec(y))){ if(/MainActivity\.java$/.test(m[1])){
   fs.writeFileSync("/tmp/MA.java", b.map(l=>l.slice(Math.min(...inds))).join("\n"));
 }}' || FAIL=1
 node tools/contract_check.js app.html /tmp/MA.java || FAIL=1
+node tools/parse_parity.js app.html .github/workflows/build-apk.yml || FAIL=1
 
 note "6/7 菜单/按钮指纹（golden）—— 改了 A 弄坏 B 的按钮"
 COMPARE=1 sh tools/menu_snapshot.sh --dump || FAIL=1
