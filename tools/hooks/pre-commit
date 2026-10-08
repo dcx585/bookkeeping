@@ -1,0 +1,68 @@
+#!/bin/sh
+# ═════════════════════════════════════════════════════════════
+# pre-commit —— 提交前自动跑门禁。改 A 弄坏 B 在本地就被拦住。
+#
+# 安装:  sh tools/install_hooks.sh   （会把这个文件复制到 .git/hooks/）
+# 绕过:  git commit --no-verify   ← 允许，但要人工承担后果
+#        紧急时用 FORCE=1 git commit 可只看警告不拦（仍会打印失败项）
+# ═════════════════════════════════════════════════════════════
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+cd "$ROOT" || exit 0
+
+# ① 快 · 只查"语法 + 结构"，不跑全套测试（提交要快，否则你会开始绕过它）
+echo "▸ pre-commit: 快速结构检查"
+
+#   §1 app.html 的内联 JS 必须能 parse（防止提交一个白屏页面）
+if [ -f app.html ]; then
+  if ! node -e '
+const fs=require("fs");
+const h=fs.readFileSync("app.html","utf8");
+const re=/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g;
+let m,c=[];while((m=re.exec(h)))c.push(m[1]);
+if(!c.length)process.exit(1);
+fs.writeFileSync("/tmp/pc.js",c.join("\n;\n"));
+' ; then
+    echo "  ❌ app.html 里没有可抽取的 <script>"
+    exit 1
+  fi
+  if ! node --check /tmp/pc.js; then
+    echo "  ❌ app.html 内联 JS 语法错误 —— 提交了就是白屏"
+    echo "     修复后重试；确要提交: git commit --no-verify"
+    exit 1
+  fi
+fi
+
+#   §2 workflow 结构（heredoc 顶格行是这次真踩过的坑）
+for wf in $(git diff --cached --name-only --diff-filter=ACM | grep -E '^\.github/workflows/.*\.ya?ml$'); do
+  echo "  检查 $wf"
+  sh tools/wfcheck.sh "$wf" || { echo "  ❌ $wf 有问题"; exit 1; }
+done
+
+#   §3 数据文件不能提交成坏 JSON
+for f in $(git diff --cached --name-only --diff-filter=ACM | grep -E '\.json$'); do
+  case "$f" in
+    package*.json|tsconfig*.json|manifest.json) continue ;;
+  esac
+  if [ -f "$f" ]; then
+    sh tools/jbcheck.sh "$f" || { echo "  ❌ $f 不是合法 JSON"; exit 1; }
+  fi
+done
+
+# ② 慢 · 全套门禁只在"改了核心文件"时跑
+if git diff --cached --name-only | grep -qE '^(app\.html|tools/|\.github/)'; then
+  echo ""
+  echo "▸ pre-commit: 核心文件有改动 → 跑全套回归门禁"
+  if [ "${FORCE:-0}" = "1" ]; then
+    sh tools/check.sh || echo "  ⚠ 有失败但 FORCE=1，继续提交（失败项已打印在上面）"
+  else
+    sh tools/check.sh || {
+      echo ""
+      echo "  ⛔ 门禁未通过，提交已阻止。"
+      echo "     修好再提交；确要绕过: git commit --no-verify"
+      exit 1
+    }
+  fi
+fi
+
+echo "✓ pre-commit 通过"
+exit 0

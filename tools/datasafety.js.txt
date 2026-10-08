@@ -1,0 +1,93 @@
+# 数据安全网（schemaVersion + 写前快照）—— 附加到 app.html 的 <script> 末尾即可
+# ─────────────────────────────────────────────────────────────
+# 为什么需要：CI / 测试只能保证"代码逻辑没变"，保证不了"用户数据没被写坏"。
+# 代码回滚 git checkout 就完事；数据被覆盖/写坏是不可逆的。
+# 这一层是唯一能兜住"改 A 破坏 B 把用户一年流水写没了"的手段。
+# ─────────────────────────────────────────────────────────────
+
+const SCHEMA_VERSION = 2;          // ★ 数据格式版本号。改数据结构的每次都要 +1
+const SNAP_PREFIX = 'minis_snap_'; // 快照 key 前缀
+const SNAP_KEEP = 7;               // 保留最近 7 份
+
+// ── 1. 所有写入的唯一出口。禁止任何地方再直接 localStorage.setItem(CK...) ──
+const WRITE_KEYS = [SK, BK, AK, IK, IMP_SKIP_KEY]; // 用你项目里真实的常量名替换
+
+function snapshotBeforeWrite(keys) {
+  try {
+    const dump = {};
+    let has = false;
+    keys.forEach(k => { const v = localStorage.getItem(k); if (v != null) { dump[k] = v; has = true; } });
+    if (!has) return;                       // 首次写入，没有可丢的东西
+    const rec = { ts: Date.now(), schemaVersion: SCHEMA_VERSION, data: dump };
+    localStorage.setItem(SNAP_PREFIX + rec.ts, JSON.stringify(rec));
+    // 只留最近 SNAP_KEEP 份，防止把 localStorage 撑爆
+    const all = Object.keys(localStorage).filter(k => k.startsWith(SNAP_PREFIX)).sort();
+    while (all.length > SNAP_KEEP) localStorage.removeItem(all.shift());
+  } catch (e) { /* 快照失败绝不能阻塞正常写入，但要留痕 */ ts('快照失败'); }
+}
+
+function safeWrite(fn) {
+  // 同一次「用户操作」内的多次写只拍一张快照（避免刷屏 7 份全是同一状态）
+  if (!safeWrite._open) { snapshotBeforeWrite(WRITE_KEYS); safeWrite._open = true; }
+  try { fn(); } finally { safeWrite._open = false; }
+}
+
+// 例：把原来的 stx(d) 改成：
+//   function stx(d){ safeWrite(()=>localStorage.setItem(SK, JSON.stringify(d))); }
+
+// ── 2. 启动时迁移 + 校验：数据不会因为新版本代码而"读不出来" ──
+function loadWithMigration() {
+  let raw = localStorage.getItem(SK);
+  if (raw == null) return [];
+  let arr;
+  try { arr = JSON.parse(raw); } catch (e) {
+    // ★ 解析失败绝不能清空重来（那才是真正的数据事故）
+    //   改为：隔离坏数据 + 提示用户从快照/备份恢复
+    localStorage.setItem(SK + '_CORRUPT_' + Date.now(), raw);
+    ts('数据损坏，已隔离保存。请用「备份/恢复」找回。');
+    return null;   // null = 明确表示"读不出来"，让 UI 走只读模式，不写入！
+  }
+  if (!Array.isArray(arr)) return null;
+
+  const v = parseInt(localStorage.getItem(SK + '_v') || '1', 10);
+  if (v < SCHEMA_VERSION) {
+    arr = migrateTx(arr, v);                 // 逐版本迁移，纯函数，可单测
+    localStorage.setItem(SK + '_v', String(SCHEMA_VERSION));
+  }
+  return arr;
+}
+
+// ── 3. 迁移必须是纯函数（不碰 localStorage），这样才能被测试 ──
+function migrateTx(arr, fromV) {
+  let out = arr;
+  if (fromV < 2) {
+    // v1→v2：补齐 id 字段（旧数据没有 id，会导致去重/删除失效）
+    const seen = new Set();
+    out = out.map((t, i) => {
+      const id = t.id || ('m' + (t.time || '') + '_' + i);
+      if (seen.has(id)) return Object.assign({}, t, { id: id + '_' + i });
+      seen.add(id);
+      return Object.assign({}, t, { id: id });
+    });
+  }
+  return out;
+}
+
+// ── 4. 一键恢复到最近一次快照 ──
+function restoreLatestSnapshot() {
+  const keys = Object.keys(localStorage).filter(k => k.startsWith(SNAP_PREFIX)).sort();
+  if (!keys.length) { ts('没有可用快照'); return false; }
+  const rec = JSON.parse(localStorage.getItem(keys[keys.length - 1]));
+  if (!confirm('恢复到 ' + new Date(rec.ts).toLocaleString() + ' 的快照？')) return false;
+  Object.keys(rec.data).forEach(k => localStorage.setItem(k, rec.data[k]));
+  location.reload();
+  return true;
+}
+
+// ── 5. 导出备份里必须带版本号，否则以后无法安全导入 ──
+//   backupData() 里把 d 改成：
+//     const d = { schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString(), ...原字段 };
+//   restoreData() 里导入前检查：
+//     if (d.schemaVersion > SCHEMA_VERSION) { alert('备份来自更新的版本，请先升级 App'); return; }
+//     if (d.schemaVersion < SCHEMA_VERSION) { d.tx = migrateTx(d.tx || [], d.schemaVersion || 1); }
+//   并且【导入前先 snapshotBeforeWrite([SK])】——导入是最容易覆盖数据的操作。

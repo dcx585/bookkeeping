@@ -1,0 +1,63 @@
+name: Gate
+
+# ─────────────────────────────────────────────────────────────
+# push 时跑测试并【真正挡住】坏代码。要点：
+#   1. 与本地 tools/check.sh 是同一份脚本 → 本地过了 CI 就过，不搞两套标准
+#   2. 只有 job 名 (Gate / gate) 被配成 branch protection 的
+#      required status check，它失败才会真的阻止合并
+#   3. 失败必须 exit 非0 —— 只发通知不阻断等于没有门禁
+#   4. 本 workflow 自己也要被 wfcheck.sh 检查（heredoc 顶格行会让
+#      GitHub 拒绝加载整个文件 → 静默失效）
+# ─────────────────────────────────────────────────────────────
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: PyYAML（wfcheck 要用它验证 YAML 可解析）
+        run: pip install --quiet pyyaml
+
+      - name: 跑与本地完全一致的门禁
+        run: sh tools/check.sh
+
+      # 关键：把"门禁通过了"这件事做成一个【成功才有】的信号文件。
+      # branch protection 里 required check 失败=红叉，这一步保证
+      # 任何一步被 step 级 continue-on-error / `|| true` 吞掉都会被抓出来。
+      - name: 门禁成功标记
+        run: |
+          if [ ! -f tools/check.sh ]; then
+            echo "::error::tools/check.sh 不见了！门禁被删掉了。"
+            exit 1
+          fi
+          grep -q 'exit \$FAIL' tools/check.sh || {
+            echo "::error::tools/check.sh 不再以非0退出报告失败 → 门禁变成纯装饰。"
+            exit 1
+          }
+          echo "门禁脚本完整且会以非0退出 ✓"
