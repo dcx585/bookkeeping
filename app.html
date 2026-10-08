@@ -346,6 +346,16 @@ input[type=checkbox]{accent-color:var(--accent)}
         <option value="to">转入方付</option>
       </select>
     </div>
+    <div class="row" id="txInstRow" style="display:none;margin-top:4px">
+      <span style="font-size:13px;color:var(--text2);align-self:center;flex:0 0 auto;margin-right:8px">分期</span>
+      <select id="txInstallment" style="flex:1;padding:12px 10px;border:1px solid var(--border);border-radius:10px;font-size:14px;font-family:inherit;background:var(--bg);color:var(--text);outline:none">
+        <option value="1">不分期</option>
+        <option value="3">分 3 期</option>
+        <option value="6">分 6 期</option>
+        <option value="12">分 12 期</option>
+        <option value="24">分 24 期</option>
+      </select>
+    </div>
     <button class="submit" id="txSubmit" onclick="saveTx()">确认支出</button>
     <button class="cancel-btn" onclick="closeTxModal()">取消</button>
   </div>
@@ -367,6 +377,7 @@ input[type=checkbox]{accent-color:var(--accent)}
       <button class="cancel-btn" onclick="importCSV();closeMore()" style="margin:0">📥 导入CSV</button>
       <button class="cancel-btn" onclick="importFromClipboard();closeMore()" style="margin:0">📋 从剪贴板导入</button>
       <button class="cancel-btn" onclick="openImportNotify();closeMore()" style="margin:0">📲 导入通知</button>
+      <button class="cancel-btn" onclick="openRecon();closeMore()" style="margin:0">⚖️ 余额对账（查漏记）</button>
     </div>
     <button class="cancel-btn" onclick="closeMore()" style="margin-top:8px">关闭</button>
   </div>
@@ -394,6 +405,14 @@ input[type=checkbox]{accent-color:var(--accent)}
     <button class="cancel-btn" onclick="showImpDiag()" style="margin-top:4px;font-size:12px;opacity:.7">诊断（看原始数据）</button>
     <button class="cancel-btn" onclick="clearHandled();ts('已清空「已处理」记录，下次扫描会重新判定')" style="margin-top:4px;font-size:12px;opacity:.7">清空已处理记录</button>
     <button class="cancel-btn" onclick="closeImportNotify()" style="margin-top:4px">关闭</button>
+  </div>
+</div>
+
+<div class="modal" id="reconModal">
+  <div class="sheet"><h3>余额对账</h3>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.6">填一下各账户的<b>真实余额</b>（打开微信/银行App看一眼），系统会告诉你差多少 —— <b>差额就是漏记的金额</b>。</div>
+    <div id="reconList" style="max-height:46vh;overflow-y:auto;margin-bottom:10px"></div>
+    <button class="cancel-btn" onclick="document.getElementById('reconModal').classList.remove('show')">关闭</button>
   </div>
 </div>
 
@@ -673,7 +692,7 @@ function rtx(){
       }
     }
     return `<div class="tx-item" style="animation-delay:${i*55}ms" onclick="editTx('${t.id}')">
-      <div class="info"><div class="title">${t.note||(isT?'转账':isE?'支出':'收入')}${isT&&t.fee?`<span style="font-size:11px;color:var(--text3)"> 手续费 ¥${t.fee.toFixed(2)}(${t.feePayer==='to'?'转入方付':'转出方付'})</span>`:''}${t.auto?'<span class="auto-tag">自动</span>':''}</div><div class="meta">${d.getMonth()+1}/${d.getDate()} · ${isT?t.from+' → '+t.to:[t.account,t.category].filter(Boolean).join(' · ')}</div>${balHtml}</div>
+      <div class="info"><div class="title">${t.note||(isT?'转账':isE?'支出':'收入')}${isT&&t.fee?`<span style="font-size:11px;color:var(--text3)"> 手续费 ¥${t.fee.toFixed(2)}(${t.feePayer==='to'?'转入方付':'转出方付'})</span>`:''}${t.auto?'<span class="auto-tag">自动</span>':''}${t.instGroup?`<span class="auto-tag" style="color:var(--gold)">分期${t.instIdx}/${t.instTotal}</span>`:''}</div><div class="meta">${d.getMonth()+1}/${d.getDate()} · ${isT?t.from+' → '+t.to:[t.account,t.category].filter(Boolean).join(' · ')}</div>${balHtml}</div>
       <div class="amount ${isE?'exp':isI?'inc':''}" style="${isT?'color:var(--gold)':''}">${sign}¥${t.amount.toFixed(2)}</div>
       <div class="del-btn" onclick="event.stopPropagation();delTx('${t.id}')">×</div>
     </div>`;
@@ -804,6 +823,30 @@ function saveTx(){
   else{entry.account=document.getElementById('txAcctBtn').textContent;entry.category=document.getElementById('txCatBtn').textContent;if(entry.account==='账户')entry.account='';if(entry.category==='分类')entry.category=''}
   // 针对已有交易(编辑)先回滚理财金额
   if(eid){const old=data.find(t=>t.id===eid);if(old&&old.type==='transfer'){applyInvDelta(old.from,-old.amount);applyInvDelta(old.to,old.amount)}}
+  // ★ 分期：支出可分 N 期，自动分摊到往后各月（花呗/信用卡分期的正确记法）
+  //    总额不变，只是把"当月一次性"摊成每月一笔，流水标注（分期 n/N）
+  let periods=1;
+  try{ periods=parseInt((document.getElementById('txInstallment')||{}).value,10)||1; }catch(e){ periods=1; }
+  if(ct==='expense' && !eid && periods>1){
+    const gid=uid();
+    const base=Math.floor(a*100/periods)/100;          // 每期金额（分位取整）
+    const ymd=d.split('-').map(Number);
+    let acc=0;
+    for(let i=0;i<periods;i++){
+      let amt;
+      if(i===periods-1){ amt=Math.round((a-acc)*100)/100; }   // 末期吸收尾差，保证总额准确
+      else { amt=base; acc+=base; }
+      const dt=new Date(ymd[0],(ymd[1]-1)+i,ymd[2]);          // 逐月顺延
+      const ds=dt.toISOString().slice(0,10);
+      data.push({id:uid(),time:ds+'T12:00:00',type:'expense',amount:amt,
+                 note:(n?n+' ':'')+'（分期 '+(i+1)+'/'+periods+'）',
+                 account:entry.account,category:entry.category,
+                 instGroup:gid,instIdx:i+1,instTotal:periods});
+    }
+    stx(data);closeTxModal();ra();
+    ts('已分 '+periods+' 期，每月 ¥'+base.toFixed(2)+'（共 ¥'+a.toFixed(2)+'）');
+    return;
+  }
   if(eid){const i=data.findIndex(t=>t.id===eid);if(i>=0)Object.assign(data[i],entry)}else data.push(entry);
   stx(data);
   // 转账涉及理财账户 → 联动更新理财账户余额
@@ -826,7 +869,7 @@ async function delTx(id){
   if(old&&old.type==='transfer'){applyInvDelta(old.from,old.amount);applyInvDelta(old.to,-old.amount)}
   stx(atx().filter(t=>t.id!==id));ra();ts('已删除');
 }
-function st2(type,btn){ct=type;document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const isT=type==='transfer';document.getElementById('txCatRow').style.display=isT?'none':'flex';document.getElementById('txTransferRow').style.display=isT?'flex':'none';document.getElementById('txFeeRow').style.display=isT?'flex':'none';document.getElementById('txSubmit').textContent=isT?'确认转账':type==='expense'?'确认支出':'确认收入';document.getElementById('txCatBtn').textContent='分类';document.getElementById('txCatBtn').classList.remove('selected')}
+function st2(type,btn){ct=type;document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const isT=type==='transfer';document.getElementById('txCatRow').style.display=isT?'none':'flex';document.getElementById('txTransferRow').style.display=isT?'flex':'none';document.getElementById('txFeeRow').style.display=isT?'flex':'none';document.getElementById('txInstRow').style.display=(type==='expense')?'flex':'none';document.getElementById('txSubmit').textContent=isT?'确认转账':type==='expense'?'确认支出':'确认收入';document.getElementById('txCatBtn').textContent='分类';document.getElementById('txCatBtn').classList.remove('selected')}
 
 // ── Picker ──
 let pT='',pS='';
@@ -1969,6 +2012,69 @@ function doImportConfirm(){
   doImportScan(); // 刷新，已入账的立即消失
 }
 
+// ── 余额对账 ──────────────────────────────────────────
+// 用途：漏记会让账面余额和真实余额对不上。填一次真实余额，系统直接算出差额。
+// 差额 = 真实 - 账面。若差 -20，说明有 20 元支出漏记了。
+function reconDerived(){
+  const bal={};
+  atx().forEach(t=>{
+    if(t.type==='transfer'){
+      bal[t.from]=(bal[t.from]||0)-t.amount;
+      bal[t.to]=(bal[t.to]||0)+t.amount;
+      if(t.fee){ if(t.feePayer==='to') bal[t.to]=(bal[t.to]||0)-t.fee; else bal[t.from]=(bal[t.from]||0)-t.fee; }
+    } else if(t.account){
+      bal[t.account]=(bal[t.account]||0)+(t.type==='income'?t.amount:-t.amount);
+    }
+  });
+  return bal;
+}
+function openRecon(){
+  const accts=ga()||[];
+  const invs=(gi()||[]).filter(x=>x.ours!==false);
+  const der=reconDerived();
+  let html='';
+  if(!accts.length && !invs.length){
+    html='<div style="color:var(--text2);font-size:13px;padding:12px 0">还没有账户。先在「账户」里添加。</div>';
+  }
+  accts.forEach(a=>{
+    const d=Number(der[a]||0);
+    html+=`<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="flex:1;font-size:14px">${a}</span>
+        <span style="font-size:12px;color:var(--text2)">账面 ¥${d.toFixed(2)}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+        <span style="font-size:12px;color:var(--text2);flex:0 0 auto">真实余额</span>
+        <input type="number" step="0.01" inputmode="decimal" data-recon="${a}" data-book="${d}"
+          oninput="reconShow(this)" placeholder="填真实余额"
+          style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);font-size:14px">
+        <span class="recon-diff" data-for="${a}" style="font-size:12px;flex:0 0 auto;min-width:70px;text-align:right"></span>
+      </div>
+    </div>`;
+  });
+  invs.forEach(x=>{
+    html+=`<div style="padding:8px 0;border-bottom:1px solid var(--border);opacity:.85">
+      <span style="font-size:14px">${x.name}</span>
+      <span style="font-size:12px;color:var(--text2)"> （理财账户）当前 ¥${(Number(x.amount)||0).toFixed(2)}</span>
+    </div>`;
+  });
+  document.getElementById('reconList').innerHTML=html;
+  document.getElementById('reconModal').classList.add('show');
+}
+function reconShow(inp){
+  const name=inp.getAttribute('data-recon');
+  const book=Number(inp.getAttribute('data-book'))||0;
+  const el=document.querySelector('.recon-diff[data-for="'+name+'"]');
+  if(!el) return;
+  const v=inp.value.trim();
+  if(v===''){ el.textContent=''; return; }
+  const real=parseFloat(v);
+  if(isNaN(real)){ el.textContent=''; return; }
+  const diff=Math.round((real-book)*100)/100;
+  if(Math.abs(diff)<0.005){ el.style.color='var(--green)'; el.textContent='✅ 对平'; }
+  else if(diff<0){ el.style.color='#e55'; el.textContent='差 '+diff.toFixed(2)+'（漏记）'; }
+  else { el.style.color='var(--gold)'; el.textContent='多 '+diff.toFixed(2); }
+}
 // ── 自动记账模块 ──
 const AUTO_THRESHOLD = 30;          // ¥30 以下自动入账
 const DEDUP_WINDOW = 5*60*1000;     // 5分钟内同指纹视为同一条（防重叠重复）
