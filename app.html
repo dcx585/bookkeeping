@@ -136,6 +136,7 @@ body{
 .tx-item .amount{font-size:17px;font-weight:700;text-align:right;margin-left:16px;flex-shrink:0;font-feature-settings:"tnum";font-variant-numeric:tabular-nums}
 .tx-item .amount.exp{color:var(--red)}
 .tx-item .amount.inc{color:var(--green)}
+.auto-tag{display:inline-block;margin-left:6px;padding:1px 5px;border-radius:4px;font-size:10px;font-weight:500;color:var(--accent);background:rgba(120,120,120,.14);vertical-align:middle}
 .tx-item .del-btn{color:var(--text3);font-size:14px;padding:4px 0 4px 12px;cursor:pointer;flex-shrink:0;transition:color .2s}
 .tx-item .del-btn:active{color:var(--red)}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
@@ -672,7 +673,7 @@ function rtx(){
       }
     }
     return `<div class="tx-item" style="animation-delay:${i*55}ms" onclick="editTx('${t.id}')">
-      <div class="info"><div class="title">${t.note||(isT?'转账':isE?'支出':'收入')}${isT&&t.fee?`<span style="font-size:11px;color:var(--text3)"> 手续费 ¥${t.fee.toFixed(2)}(${t.feePayer==='to'?'转入方付':'转出方付'})</span>`:''}</div><div class="meta">${d.getMonth()+1}/${d.getDate()} · ${isT?t.from+' → '+t.to:[t.account,t.category].filter(Boolean).join(' · ')}</div>${balHtml}</div>
+      <div class="info"><div class="title">${t.note||(isT?'转账':isE?'支出':'收入')}${isT&&t.fee?`<span style="font-size:11px;color:var(--text3)"> 手续费 ¥${t.fee.toFixed(2)}(${t.feePayer==='to'?'转入方付':'转出方付'})</span>`:''}${t.auto?'<span class="auto-tag">自动</span>':''}</div><div class="meta">${d.getMonth()+1}/${d.getDate()} · ${isT?t.from+' → '+t.to:[t.account,t.category].filter(Boolean).join(' · ')}</div>${balHtml}</div>
       <div class="amount ${isE?'exp':isI?'inc':''}" style="${isT?'color:var(--gold)':''}">${sign}¥${t.amount.toFixed(2)}</div>
       <div class="del-btn" onclick="event.stopPropagation();delTx('${t.id}')">×</div>
     </div>`;
@@ -1348,6 +1349,15 @@ function refreshImpStatus(){
   } else if(granted && !ev.lastNotifTs){
     need=true;
     msg='服务已连上但还没收到过任何通知。若明明有通知却一直为空，请给「记账」打开「后台高耗电」「允许自启动」。';
+  } else if(granted && ev.lastNotifTs && (Date.now()-Number(ev.lastNotifTs))>2*3600*1000){
+    // ★ 关键一档：服务曾经连过、也收到过通知，但【很久没动静了】。
+    //   手机天天有通知，超过 2 小时没收到 = 服务被系统冻结了（国产ROM 常见）。
+    //   这不是代码问题，必须用户去开后台保活。
+    need=true;
+    msg='通知服务已停摆 '+agoText(ev.lastNotifTs)+'（手机天天有通知，不该这么久没动静）——'
+       +'系统在后台把「记账」冻结了，通知收不到。\n请到 系统设置 里给「记账」打开：\n'
+       +'  · 后台高耗电 / 允许后台运行\n  · 自启动\n  · 电池 → 不受限制\n'
+       +'设置后回到本页点「重连通知服务」。'
   }
   hint.style.display=need?'block':'none';
   if(need){
@@ -1691,6 +1701,61 @@ function undelImpItem(i){
   unmarkHandled(entryKey(d.t));     // 撤销「已处理」标记 → 允许它回到框中
   impTx.push(d.t); renderImpList(); ts('已恢复');
 }
+// ── 智能配对去重 ────────────────────────────────────────
+// ① 同一 key（同一条通知/短信）→ 去重
+// ② 金额完全相同 + 同类型 + 10分钟内 → 视为重复（银行短信 + 银行App推送）
+// ③ ★【面额 vs 实付】充值/缴费短信写的是面额(如充100)，银行短信写的是实付(如扣96)：
+//    同一时间窗内两者是【同一笔交易】，必须合并成一条，金额取【实付】。
+//    否则会出现「充100 + 扣96 = 196，实际只花96」的重复记账。
+function isRechargeItem(e){
+  const acc=(e&&e.account)||'';
+  if(/银行卡|储蓄卡|信用卡|借记卡/.test(acc)) return false;   // 银行自己的通知不算"面额"
+  return /充值|缴费|话费|电费|水费|燃气费|充话费/.test((e&&e.note)||'');
+}
+function isBankItem(e){
+  const acc=(e&&e.account)||'';
+  const note=(e&&e.note)||'';
+  if(/银行卡|储蓄卡|信用卡|借记卡/.test(acc)) return true;
+  // ★ 银行短信常常不写"银行"二字，只写「尾号2374卡消费96.00元」——
+  //   靠关键词"银行"会漏判，导致 充100/扣96 无法配对 → 重复记账。
+  if(/尾号\s?\d{3,6}/.test(note)) return true;      // 尾号2374卡
+  if(/卡号\s?\d/.test(note)) return true;           // 卡号****1234
+  if(/人民币/.test(note)) return true;              // 银行特有措辞
+  if(/(储蓄|信用|借记)卡/.test(note)) return true;
+  return false;
+}
+function mergePool(pool){
+  // 排序：已记账优先（避免重复入账），其次银行实付优先（金额更准），再按时间倒序
+  pool.sort((a,b)=>{
+    const r=(b._recorded?1:0)-(a._recorded?1:0); if(r) return r;
+    const bk=(isBankItem(b)?1:0)-(isBankItem(a)?1:0); if(bk) return bk;
+    return (b._smsDate||b._time||0)-(a._smsDate||a._time||0);
+  });
+  const out=[], seenK=new Set();
+  const WINDOW=10*60*1000;
+  for(const e of pool){
+    const k=entryKey(e)||e.finger;
+    if(k&&seenK.has(k)) continue;                 // ① 同 key
+    if(e._manual){ if(k)seenK.add(k); out.push(e); continue; }
+    const t=e._smsDate||e._time||0;
+    const amt=Number(e.amount);
+    let dup=false;
+    for(const o of out){
+      if(o._manual) continue;
+      if((o.type||'expense')!==(e.type||'expense')) continue;
+      const ot=o._smsDate||o._time||0;
+      if(t&&ot&&Math.abs(ot-t)>WINDOW) continue;
+      const oamt=Number(o.amount);
+      if(Math.abs(oamt-amt)<0.005){ dup=true; break; }            // ② 金额相同
+      if(isRechargeItem(o)&&isBankItem(e)&&amt<=oamt&&amt>=oamt*0.5){ dup=true; break; }  // ③ 面额vs实付
+      if(isBankItem(o)&&isRechargeItem(e)&&oamt<=amt&&oamt>=amt*0.5){ dup=true; break; }  // ③ 实付vs面额（o是银行实付，e是面额）
+    }
+    if(dup) continue;
+    if(k) seenK.add(k);
+    out.push(e);
+  }
+  return out;
+}
 async function doImportScan(){
   const st=document.getElementById('importNotifyStatus');
   st.style.display='block'; st.textContent='扫描中...';
@@ -1740,7 +1805,7 @@ async function doImportScan(){
       }
       parsed.forEach(p=>{
         const e=Object.assign({},p,{_rawId:n.id,_rawNkey:n.nkey,_src:'notice',_time:n.time,_boxKey:key});
-        e._recorded=!!(e.finger && txFingerExists(e.finger, e._time));   // 已记账标记（配对去重要用）
+        e._recorded=isAlreadyBooked(e);   // 已记账标记（含面额/实付跨来源判断）
         pool.push(e);
       });
     }
@@ -1770,28 +1835,14 @@ async function doImportScan(){
         }
         parsed.forEach(p=>{
           const e=Object.assign({},p,{_rawId:'',_rawNkey:key,_src:'sms',_smsAddress:s.address,_smsDate:s.date,_boxKey:key});
-          e._recorded=!!(e.finger && txFingerExists(e.finger, e._smsDate));
+          e._recorded=isAlreadyBooked(e);
           pool.push(e);
         });
       }
     }
 
-    // ── ③ 配对去重 ──
-    //   同一笔交易的「短信 + 通知」双来源：金额/同一天/同类型 且 时间差 ≤10 分钟 → 合并成一条
-    //   （银行短信与银行App推送常是同一笔；不去重框里就会出现两条一模一样的）
-    //   已记账的优先当代表 → 整对一起消失
-    pool.sort((a,b)=>(b._recorded?1:0)-(a._recorded?1:0));
-    const seenK=new Set(), seenPay={};
-    const merged=pool.filter(e=>{
-      const k=entryKey(e)||e.finger; if(!k||seenK.has(k)) return false;
-      if(e._manual){ seenK.add(k); return true; }   // 手填项金额未知，不参与配对去重
-      const t=e._smsDate||e._time||0;
-      const day=t?new Date(t).toISOString().slice(0,10):'?';
-      const pk=day+'|'+(e.type||'expense')+'|'+Number(e.amount).toFixed(2);
-      const prev=seenPay[pk];
-      if(prev && Math.abs((prev._smsDate||prev._time||0)-t)<=10*60*1000) return false;
-      seenK.add(k); seenPay[pk]=e; return true;
-    });
+    // ── ③ 智能配对去重（见 mergePool：含「面额 vs 实付」合并，防充100+扣96=196）──
+    const merged=mergePool(pool);
     const nMerge=pool.length-merged.length;
 
     // ── ④ 源清理：通知里已无待入账条目的 → 从原生队列删除 ──
@@ -2029,7 +2080,7 @@ function singleParse(seg,parentAcc){
   let account='';
   if(/支付宝/.test(s)) account='支付宝';
   else if(/微信|财付通/.test(s)) account='微信';
-  else if(/银行卡|银行|招商|工商|建设|农业|中国银行/.test(s)) account='银行卡';
+  else if(/银行卡|银行|招商|工商|建设|农业|中国银行|尾号\s?\d{3,6}|卡号\s?\d/.test(s)) account='银行卡';
   if(!account) account=parentAcc||'';
   if(!isPaymentSegment(s)) return null;
   return {amount:amt,type:type,category:category,account:account,
@@ -2090,6 +2141,34 @@ function ackPending(ids){
 // 匹配规则：
 //   ref:xxx  → 流水号/单号精确匹配（最可靠）
 //   amt:账户:金额:窗口 → 账户+金额相同，且时间在 ±5 分钟内（不用"桶相等"，避免跨 5 分钟边界的漏判）
+// 这笔是否已经入账（比 txFingerExists 更全面）：
+//  ① 指纹完全相同（同一条通知/短信）
+//  ② 金额+账户相同且时间相近（同一天的同一笔，不同来源）
+//  ③ ★面额 vs 实付：本条是"充值100"，账本里已有"银行扣96"（或反过来）→ 认定同一笔，避免重复记账
+//     （只比指纹会漏掉：银行通知先自动记了96，之后充值短信又冒出100 → 记成196）
+function isAlreadyBooked(e){
+  if(!e) return false;
+  if(e.finger && txFingerExists(e.finger, e._smsDate||e._time)) return true;
+  const amt=Number(e.amount);
+  if(!(amt>0)) return false;
+  const t=Number(e._smsDate||e._time||0);
+  const all=atx();
+  const near=rt=>{
+    if(!t||!rt) return true;                       // 时间不可比 → 放宽
+    if(Math.abs(rt-t)<=10*60*1000) return true;
+    try{ return new Date(rt).toISOString().slice(0,10)===new Date(t).toISOString().slice(0,10); }catch(x){ return false; }
+  };
+  for(let i=0;i<all.length;i++){
+    const r=all[i];
+    if((r.type||'expense')!==(e.type||'expense')) continue;
+    const rt=new Date(r.time).getTime();
+    const ramt=Number(r.amount);
+    if(Math.abs(ramt-amt)<0.005 && near(rt)) return true;                       // ② 同额同源
+    if(isRechargeItem(e)&&isBankItem(r)&&ramt<=amt&&ramt>=amt*0.5&&near(rt)) return true;   // ③ 面额(本) vs 实付(账本)
+    if(isBankItem(e)&&isRechargeItem(r)&&amt<=ramt&&amt>=ramt*0.5&&near(rt)) return true;   // ③ 实付(本) vs 面额(账本)
+  }
+  return false;
+}
 function txFingerExists(finger, when){
   if(!finger) return false;
   const all=atx();
@@ -2143,10 +2222,10 @@ async function autoBookkeep(){
     if(!es.length){ autoAck.push(nid); continue; }  // 非支付通知
     let anyAuto=false, anyConfirm=false;
     for(const e of es){
-      if(seen.has(e.finger)||txFingerExists(e.finger, e._smsDate||e._time)){ anyAuto=true; continue; }
+      if(seen.has(e.finger)||isAlreadyBooked(e)){ anyAuto=true; continue; }
       seen.add(e.finger);
       if(!e.needConfirm){
-        tx.push(makeTx(e)); autoN++; anyAuto=true;
+        tx.push(makeTx(e,{auto:true})); autoN++; anyAuto=true;   // 打「自动」标记，便于在流水里辨认
         // 【关键】自动入账也必须留痕：否则用户打开框是空的，
         // 会误以为"根本没识别到"，而其实早就记进去了。
         autoLog.push({ts:Date.now(), amount:e.amount, type:e.type,
@@ -2166,7 +2245,12 @@ async function autoBookkeep(){
     autoQueue=confirmItems; autoIdx=0;
     setTimeout(()=>showAutoConfirm(),150);
   } else if(pendingAutoCount>0){
-    setTimeout(()=>{ts('自动记账 '+pendingAutoCount+' 条（¥'+AUTO_THRESHOLD+' 以内）');pendingAutoCount=0;},400);
+    setTimeout(()=>{
+      const last=autoLog[autoLog.length-1];
+      ts('已自动记 ¥'+(last?Number(last.amount).toFixed(2):'')+(last&&last.category?(' · '+last.category):'')
+         +(pendingAutoCount>1?('（共 '+pendingAutoCount+' 笔）'):'')+' → 见「流水」页');
+      pendingAutoCount=0;
+    },400);
   }
   ackPending(autoAck);
   } finally { autoRunning=false; }
@@ -2264,7 +2348,17 @@ ra();
   })();
   // 2) 页面可见时每 5 秒轮询处理新通知（fingerprint 判重 + autoRunning 锁防重复）
   let pollTimer=null;
-  function startPoll(){ if(pollTimer) return; pollTimer=setInterval(()=>{ if(document.visibilityState==='visible') autoBookkeep(); },5000); }
+  function startPoll(){ if(pollTimer) return; pollTimer=setInterval(()=>{
+    if(document.visibilityState!=='visible') return;
+    autoBookkeep();
+    // 每 30 秒主动抓一次通知栏：服务被系统冻结时，靠这个补漏
+    // （被动接收失效的机型，只要打开着 app 就还能抓到当前通知）
+    __scanTick++;
+    if(__scanTick%6===0 && window.MinisBridge && typeof window.MinisBridge.triggerScan==='function'){
+      try{ window.MinisBridge.triggerScan(); }catch(e){}
+    }
+  },5000); }
+  let __scanTick=0;
   function stopPoll(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
   if(document.visibilityState==='visible') startPoll();
   // 3) visibilitychange / focus 事件：切回前台立即处理 + 检查通知服务是否掉线
