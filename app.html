@@ -179,6 +179,7 @@ body{
 .acct-item:last-child{border-bottom:none}
 .acct-item .acct-name{font-weight:500}
 .acct-item .acct-val{font-weight:700;font-feature-settings:"tnum";font-variant-numeric:tabular-nums}
+.acct-item.acct-col{display:block}
 
 /* ── FAB ── */
 .fab{position:fixed;bottom:100px;right:16px;width:52px;height:52px;border-radius:50%;background:var(--accent);color:#fff;font-size:24px;line-height:52px;text-align:center;border:none;cursor:pointer;z-index:100;transition:transform .2s cubic-bezier(.32,.72,0,1),opacity .3s;box-shadow:0 2px 10px rgba(0,0,0,.1)}
@@ -555,7 +556,7 @@ input[type=checkbox]{accent-color:var(--accent)}
 // ── State ──
 const SK='minis_bookkeeping_v5',BK='minis_budget_v3',AK='minis_accounts_v2',BGK='minis_bg_v1',IK='minis_invest_v1';
 let cm=new Date().toISOString().slice(0,7),ct='expense',cv='tx',eid=null,sq='';
-const DA=['微信','银行卡','应急金','花呗'];
+const DA=['微信','银行卡','应急金','规划金','花呗'];
 const CATS=['餐饮','购物','医疗','交通','固定支出','其他'];
 const INC_CATS=['工资/月薪','工资/奖金','理财/基金收益','理财/股息','理财/利息','报销/工作报销','红包/转账','兼职/外快','退款','其他'];
 const CC={'餐饮':'#c0392b','购物':'#b8943e','交通':'#5b9eb5','固定支出':'#8b7aaa','医疗':'#d4735a','工资':'#3c7a44','理财':'#b8860b','报销':'#5b9eb5','红包':'#e67e22','兼职':'#8e44ad','退款':'#7f8c8d','其他':'#8899a6'};
@@ -582,6 +583,21 @@ function openInvEdit(name){
   invEditName=name;const a=gi().find(x=>x.name===name);
   document.getElementById('invEditTitle').textContent=name;
   document.getElementById('invEditAmount').value=a?a.amount:'';
+  // ★ 场外账户：提示"填总数、系统自动减规划金"，并实时显示纯理财
+  try{
+    const isOut=/场外/.test(name)&&(!a||a.ours!==false);
+    let box=document.getElementById('invPlanHint');
+    if(!box){
+      const inp=document.getElementById('invEditAmount');
+      box=document.createElement('div');
+      box.id='invPlanHint';
+      box.style.cssText='font-size:12px;color:var(--text2);margin-top:6px;line-height:1.6';
+      inp.parentNode.insertBefore(box, inp.nextSibling);
+      inp.addEventListener('input',updateInvPlanHint);
+    }
+    box.style.display=isOut?'block':'none';
+    updateInvPlanHint();
+  }catch(e){}
   // 历史记录
   const hp=document.getElementById('invHistory');
   const his=(a&&a.his)||[];
@@ -595,6 +611,18 @@ function openInvEdit(name){
   document.getElementById('invEditModal').classList.add('show');
 }
 function closeInvEdit(){document.getElementById('invEditModal').classList.remove('show');invEditName=''}
+// 场外理财：填"理财通里看到的总数"，系统自动减去规划金 → 纯理财
+function updateInvPlanHint(){
+  const box=document.getElementById('invPlanHint');
+  if(!box||box.style.display==='none') return;
+  const plan=(getCashBalances()['规划金']||0);
+  const v=parseFloat((document.getElementById('invEditAmount')||{}).value);
+  if(!(plan>0)){ box.innerHTML='（还没有「规划金」余额；每月转账记进「规划金」账户后，这里会自动减）'; return; }
+  const pure=isNaN(v)?null:(v-plan);
+  box.innerHTML='填<b>理财通里看到的总数</b>即可，系统自动减：<br>'
+    +'总数 '+(isNaN(v)?'—':('¥'+v.toFixed(2)))+' − 规划金 ¥'+plan.toFixed(2)
+    +' = <b style="color:var(--accent)">'+(pure==null?'—':('¥'+pure.toFixed(2)))+'</b>（纯理财）';
+}
 function saveInvEdit(){
   const v=parseFloat(document.getElementById('invEditAmount').value);
   if(isNaN(v))return ts('请输入有效金额');
@@ -777,14 +805,22 @@ function rac(){
   }).join('');
   // Investment accounts
   const inv=gi();let invTotal=0;
+  const planBal=(getCashBalances()['规划金']||0);   // 规划金余额（由流水自动算）
   document.getElementById('invList').innerHTML=inv.map(a=>{
-    if(a.ours!==false)invTotal+=a.amount||0;
+    // ★ 场外"含规划金"：理财通里看到的总数包含了规划金，
+    //   这里自动减掉规划金，显示【纯理财】——用户不必自己心算减法。
+    const hasPlan=/场外/.test(a.name)&&a.ours!==false&&planBal>0;
+    const pure=hasPlan?((a.amount||0)-planBal):(a.amount||0);
+    if(a.ours!==false)invTotal+=(hasPlan?pure:(a.amount||0));   // 计入总资产时用纯理财，避免规划金重复计算
     const m=a.month?`<span style="font-size:11px;color:var(--text3);margin-left:4px">${a.month}</span>`:'<span style="font-size:11px;color:var(--gold);margin-left:4px">未更新</span>';
     const tag=a.ours===false?'<span style="font-size:10px;color:var(--text3);margin-left:4px;background:var(--bg);padding:1px 5px;border-radius:8px">不计入</span>':'';
-    return `<div class="acct-item" onclick="openInvEdit('${a.name}')" style="cursor:pointer">
-      <span class="acct-name">${a.name}${tag}${m}</span>
-      <span class="acct-val" style="color:${a.amount>0?'var(--green)':'var(--text2)'}">¥${(a.amount||0).toLocaleString()}</span>
-      <span onclick="event.stopPropagation();deleteInv('${a.name.replace(/'/g,"\\'")}')" style="color:var(--text3);margin-left:8px;cursor:pointer;font-size:14px;padding:0 4px">×</span>
+    const sub=hasPlan?`<div style="font-size:11px;color:var(--text3);margin-top:2px">含规划金 ¥${(a.amount||0).toLocaleString()} − 规划金 ¥${planBal.toFixed(2)} = <b style="color:var(--accent)">纯理财 ¥${pure.toFixed(2)}</b></div>`:'';
+    return `<div class="acct-item acct-col" onclick="openInvEdit('${a.name}')" style="cursor:pointer">
+      <div style="display:flex;align-items:center;width:100%">
+        <span class="acct-name">${a.name}${tag}${m}</span>
+        <span class="acct-val" style="color:${pure>0?'var(--green)':'var(--text2)'}">¥${pure.toLocaleString()}</span>
+        <span onclick="event.stopPropagation();deleteInv('${a.name.replace(/'/g,"\\'")}')" style="color:var(--text3);margin-left:8px;cursor:pointer;font-size:14px;padding:0 4px">×</span>
+      </div>${sub}
     </div>`;
   }).join('');
   // Total row
