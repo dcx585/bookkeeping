@@ -388,6 +388,7 @@ input[type=checkbox]{accent-color:var(--accent)}
     <div id="importNotifyList" style="max-height:44vh;overflow-y:auto;margin-bottom:10px"></div>
     <button class="submit" onclick="doImportScan()">🔍 扫描（通知+短信）</button>
     <button class="submit" id="importConfirmBtn" onclick="doImportConfirm()" style="display:none">✓ 确认入账</button>
+    <button class="cancel-btn" onclick="analyzeAll()" style="margin-top:4px;font-size:12px;opacity:.7">全量分析（哪些没识别到）</button>
     <button class="cancel-btn" onclick="selfTestParse()" style="margin-top:4px;font-size:12px;opacity:.7">解析自测（不用付钱）</button>
     <button class="cancel-btn" onclick="showImpDiag()" style="margin-top:4px;font-size:12px;opacity:.7">诊断（看原始数据）</button>
     <button class="cancel-btn" onclick="clearHandled();ts('已清空「已处理」记录，下次扫描会重新判定')" style="margin-top:4px;font-size:12px;opacity:.7">清空已处理记录</button>
@@ -1398,6 +1399,68 @@ function selfTestParse(){
   document.getElementById('importNotifyList').innerHTML='';
   return out;
 }
+// ── 全量分析：把手机里所有短信/通知过一遍，看清到底卡在哪一步 ──
+function analyzeAll(){
+  const BR='\n────────────────\n';
+  let out='【全量分析】把手机里所有短信都过一遍，看卡在哪一步\n';
+  let sms=[];
+  try{
+    if(window.MinisBridge && typeof window.MinisBridge.readSms==='function'){
+      sms=JSON.parse(window.MinisBridge.readSms()||'[]');
+    }
+  }catch(e){ sms=[]; }
+  if(!Array.isArray(sms)) sms=[];
+  const cut=Date.now()-IMP_TTL;
+  const recent=sms.filter(s=>s.date&&s.date>=cut);
+  let pay=0, parsed=0, noise=0;
+  const payNoAmt=[], noiseTop=[];
+  const noiseKind={验证码:0, 营销:0, 催缴:0, 物流:0, 通知类:0};
+  recent.forEach(s=>{
+    const b=(s.body||'').replace(/\s+/g,' ');
+    if(looksLikePaymentText(b)){
+      pay++;
+      let r=[]; try{ r=parseNotifFull({title:'',text:b,app:s.address||'',time:s.date}); }catch(e){}
+      if(r.length) parsed++;
+      else if(payNoAmt.length<6) payNoAmt.push(b.slice(0,70));
+    }else{
+      noise++;
+      if(/验证码|校验码|动态码|取件码/.test(b)) noiseKind.验证码++;
+      else if(/退订|优惠|特惠|办卡|贷款|抽奖/.test(b)) noiseKind.营销++;
+      else if(/余额不足|欠费|请及时|应缴|应还/.test(b)) noiseKind.催缴++;
+      else if(/快递|包裹|派送|物流/.test(b)) noiseKind.物流++;
+      else noiseKind.通知类++;
+      if(noiseTop.length<3) noiseTop.push(b.slice(0,50));
+    }
+  });
+  out+='短信：共 '+sms.length+' 条，近7天 '+recent.length+' 条\n';
+  out+=' · 判为支付：'+pay+' 条，其中解析出金额 '+parsed+' 条\n';
+  out+=' · 判为非支付：'+noise+' 条（验证码'+noiseKind.验证码+'/营销'+noiseKind.营销+'/催缴'+noiseKind.催缴+'/物流'+noiseKind.物流+'/其他通知'+noiseKind.通知类+'）\n';
+  if(payNoAmt.length) out+='\n⚠ 判为支付、但解析不出金额（漏账源头，请发我）：\n · '+payNoAmt.join('\n · ')+'\n';
+  if(noiseTop.length) out+='\n剔除样本（确认没误杀）：\n · '+noiseTop.join('\n · ')+'\n';
+
+  out+=BR;
+  // 通知：已入队=判为支付；再看被滤掉的样本，确认没误杀
+  out+='通知：当前队列 '+Number(__impRaw.nNotif||0)+' 条（判为支付才入队）\n';
+  if(__impRaw.notif && __impRaw.notif.length){
+    out+=' · '+__impRaw.notif.join('\n · ')+'\n';
+  }
+  const ev=readEvidence();
+  let any=false, fl=[];
+  for(let i=1;i<=5;i++){
+    const v=ev['filtered_'+i];
+    if(v){ any=true; fl.push(v); }
+  }
+  if(any){
+    out+='\n被滤掉的通知样本（若银行通知出现在这里=我误判了，请发我）：\n · '+fl.join('\n · ')+'\n';
+  } else {
+    out+='\n（暂无被滤掉的通知样本）\n';
+  }
+  const st=document.getElementById('importNotifyStatus');
+  st.style.display='block';
+  st.textContent=out;
+  document.getElementById('importNotifyList').innerHTML='';
+  return out;
+}
 function showImpDiag(){
   const st=document.getElementById('importNotifyStatus');
   st.style.display='block';
@@ -1586,8 +1649,22 @@ function renderImpList(){
   const st=document.getElementById('importNotifyStatus');
   const cb=document.getElementById('importConfirmBtn');
   const dis=loadDismissed();
+  const alog=loadAutoLog();
   let html='';
   if(impTx.length) html+=impTx.map((t,i)=>impRowHtml(t,i)).join('');
+  // ── 已自动入账（必须显眼：否则用户以为"没识别到"）──
+  if(alog.length){
+    const recent=alog.slice().reverse().slice(0,12);
+    html+=`<div style="margin-top:12px;padding-top:8px;border-top:1px dashed var(--border);display:flex;align-items:center;gap:8px">
+        <span style="flex:1;font-size:12px;color:#2a9d5c">✅ 已自动入账 ${alog.length} 笔（已在流水，无需确认）</span>
+        <button onclick="clearAutoLog();renderImpList()" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text2);font-size:11px;padding:3px 8px;cursor:pointer">清空</button>
+      </div>`
+      + recent.map(a=>`<div style="display:flex;padding:5px 0;gap:8px;font-size:12px;color:var(--text2)">
+          <span style="width:64px;text-align:right;font-weight:600;color:var(--text)">¥${Number(a.amount).toFixed(2)}</span>
+          <span style="flex:1">${a.type==='income'?'收入':'支出'} · ${a.category||''}${a.account?' · '+a.account:''}<br><span style="opacity:.75">${(a.note||'').replace(/</g,'&lt;')}</span></span>
+          <span style="opacity:.6;white-space:nowrap">${new Date(a.ts).toLocaleTimeString().slice(0,5)}</span>
+        </div>`).join('');
+  }
   if(dis.length){
     html+=`<div style="margin-top:12px;padding-top:8px;border-top:1px dashed var(--border);display:flex;align-items:center;gap:8px">
         <span style="flex:1;font-size:12px;color:var(--text2)">已清除（灰显留存 7 天，可恢复）</span>
@@ -1603,7 +1680,9 @@ function renderImpList(){
   if(impTx.length){ st.style.display='none'; cb.style.display='block'; }
   else{
     st.style.display='block'; cb.style.display='none';
-    st.textContent = dis.length ? '框中暂无待入账支付信息（下方为已清除留存）。' : (window.__impDiag||'未发现支付信息。请保留银行/微信/支付宝的支付通知或短信后重新扫描。');
+    if(dis.length) st.textContent='框中暂无待入账支付信息（下方为已清除留存）。';
+    else if(alog.length) st.textContent='框中暂无待确认的支付（下方是已自动入账的记录）。';
+    else st.textContent = window.__impDiag||'未发现支付信息。请保留银行/微信/支付宝的支付通知或短信后重新扫描。';
   }
 }
 function undelImpItem(i){
@@ -1745,7 +1824,8 @@ async function doImportScan(){
     window.__impDiag='本轮：通知 '+nNotif+' 条 / 短信 '+nSms+' 条 → 待入账 '+impTx.length+' 条'
       +'（自动剔除：非支付 '+nDrop+' 条，已记账 '+nDup+' 条，合并重复 '+nMerge+' 条）';
     if(!impTx.length){
-      if(loadDismissed().length){ renderImpList(); return; }
+      // 有已清除留存 / 有自动入账记录 → 正常渲染，而不是显示"未发现支付信息"
+      if(loadDismissed().length || loadAutoLog().length){ renderImpList(); return; }
       if(window.MinisBridge && typeof window.MinisBridge.hasNotifAccess==='function'){
         let ok=true; try{ ok=window.MinisBridge.hasNotifAccess(); }catch(e){}
         if(!ok){
@@ -2055,7 +2135,7 @@ async function autoBookkeep(){
   try{
   const q=await readPendingQueue();
   const tx=atx();
-  let autoN=0, confirmItems=[], autoAck=[];
+  let autoN=0, confirmItems=[], autoAck=[], autoLog=[];
   const seen=new Set();
   for(const n of q){
     const nid=n.id||('q_'+Date.now()+'_'+Math.random().toString(36).slice(2,6));
@@ -2067,6 +2147,10 @@ async function autoBookkeep(){
       seen.add(e.finger);
       if(!e.needConfirm){
         tx.push(makeTx(e)); autoN++; anyAuto=true;
+        // 【关键】自动入账也必须留痕：否则用户打开框是空的，
+        // 会误以为"根本没识别到"，而其实早就记进去了。
+        autoLog.push({ts:Date.now(), amount:e.amount, type:e.type,
+                      note:e.note||'', account:e.account||'', category:e.category||'其他'});
       } else {
         confirmItems.push({pid:nid, entry:e}); anyConfirm=true;
       }
@@ -2077,7 +2161,7 @@ async function autoBookkeep(){
     else if(!anyAuto && !anyConfirm && es.length) autoAck.push(nid);
   }
   stx(tx);
-  if(autoN>0){ ra(); pendingAutoCount+=autoN; }
+  if(autoN>0){ ra(); pendingAutoCount+=autoN; appendAutoLog(autoLog); }
   if(confirmItems.length){
     autoQueue=confirmItems; autoIdx=0;
     setTimeout(()=>showAutoConfirm(),150);
@@ -2087,6 +2171,23 @@ async function autoBookkeep(){
   ackPending(autoAck);
   } finally { autoRunning=false; }
 }
+
+// ── 自动入账日志：让"已经自动记好的账"必须露面 ──
+// 背景：小额支付(≤AUTO_THRESHOLD且账户匹配)会自动入账、不进待处理框。
+// 用户只看框 → 以为"没识别到"，其实早记进去了。这里保留最近 50 条供查看。
+const AUTO_LOG_KEY='auto_log';
+function loadAutoLog(){
+  let arr=stateRead(AUTO_LOG_KEY); if(!Array.isArray(arr)) arr=[];
+  return arr;
+}
+function appendAutoLog(items){
+  if(!items||!items.length) return;
+  let arr=loadAutoLog();
+  arr=arr.concat(items);
+  if(arr.length>50) arr=arr.slice(arr.length-50);
+  stateWrite(AUTO_LOG_KEY,arr);
+}
+function clearAutoLog(){ stateWrite(AUTO_LOG_KEY,[]); }
 
 function openAutoModal(){document.getElementById('autoConfirmModal').classList.add('show')}
 function closeAutoModal(){document.getElementById('autoConfirmModal').classList.remove('show')}
