@@ -857,6 +857,23 @@ jobs:
               }
 
               // ── 判定 / 工具 ────────────────────────────────────────
+              /** 判定 / 工具 ──────────────────────────────────────── */
+              /** 记录最近被滤掉的通知样本（诊断用）：若银行通知被误判为"非支付"，这里能看见 */
+              private static void evRecordFiltered(File dir, String app, String title, String text) {
+                  synchronized (LOCK) {
+                      java.util.HashMap<String, String> m = evMap(dir);
+                      // 轮转：filtered_1..filtered_5（1 最新）
+                      for (int i = 5; i > 1; i--) {
+                          String prev = m.get("filtered_" + (i - 1));
+                          if (prev != null) m.put("filtered_" + i, prev);
+                      }
+                      String one = ((app == null ? "" : app) + " ∥ " + (title == null ? "" : title)
+                                    + " ∥ " + (text == null ? "" : text)).replace("\n", " ");
+                      if (one.length() > 160) one = one.substring(0, 160);
+                      m.put("filtered_1", one);
+                      evWrite(dir, m);
+                  }
+              }
               public static boolean isEnabled(Context ctx) {
                   try {
                       String flat = Settings.Secure.getString(ctx.getContentResolver(), "enabled_notification_listeners");
@@ -962,7 +979,7 @@ jobs:
                   File dir = getFilesDir();
                   boolean isPay = looksLikePayment(title, fulltext);
                   evRecordNotif(dir, sbn.getPackageName(), isPay);   // 硬证据：确实收到过
-                  if (!isPay) return;
+                  if (!isPay) { evRecordFiltered(dir, sbn.getPackageName(), title, fulltext); return; }
                   // 唯一键 = 包名 | 通知id | 内容哈希。
                   // 只用 package|id 会被固定 id 的支付通知永久拦死（"第一条能记、之后全不来"）。
                   String nkey = sbn.getPackageName() + "|" + sbn.getId() + "|" + hash(title + "\u0001" + fulltext);
