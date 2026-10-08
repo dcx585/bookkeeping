@@ -136,6 +136,7 @@ body{
 .tx-item .amount{font-size:17px;font-weight:700;text-align:right;margin-left:16px;flex-shrink:0;font-feature-settings:"tnum";font-variant-numeric:tabular-nums}
 .tx-item .amount.exp{color:var(--red)}
 .tx-item .amount.inc{color:var(--green)}
+.auto-tag{display:inline-block;margin-left:6px;padding:1px 5px;border-radius:4px;font-size:10px;font-weight:500;color:var(--accent);background:rgba(120,120,120,.14);vertical-align:middle}
 .tx-item .del-btn{color:var(--text3);font-size:14px;padding:4px 0 4px 12px;cursor:pointer;flex-shrink:0;transition:color .2s}
 .tx-item .del-btn:active{color:var(--red)}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
@@ -178,6 +179,7 @@ body{
 .acct-item:last-child{border-bottom:none}
 .acct-item .acct-name{font-weight:500}
 .acct-item .acct-val{font-weight:700;font-feature-settings:"tnum";font-variant-numeric:tabular-nums}
+.acct-item.acct-col{display:block}
 
 /* ── FAB ── */
 .fab{position:fixed;bottom:100px;right:16px;width:52px;height:52px;border-radius:50%;background:var(--accent);color:#fff;font-size:24px;line-height:52px;text-align:center;border:none;cursor:pointer;z-index:100;transition:transform .2s cubic-bezier(.32,.72,0,1),opacity .3s;box-shadow:0 2px 10px rgba(0,0,0,.1)}
@@ -345,6 +347,16 @@ input[type=checkbox]{accent-color:var(--accent)}
         <option value="to">转入方付</option>
       </select>
     </div>
+    <div class="row" id="txInstRow" style="display:none;margin-top:4px">
+      <span style="font-size:13px;color:var(--text2);align-self:center;flex:0 0 auto;margin-right:8px">分期</span>
+      <select id="txInstallment" style="flex:1;padding:12px 10px;border:1px solid var(--border);border-radius:10px;font-size:14px;font-family:inherit;background:var(--bg);color:var(--text);outline:none">
+        <option value="1">不分期</option>
+        <option value="3">分 3 期</option>
+        <option value="6">分 6 期</option>
+        <option value="12">分 12 期</option>
+        <option value="24">分 24 期</option>
+      </select>
+    </div>
     <button class="submit" id="txSubmit" onclick="saveTx()">确认支出</button>
     <button class="cancel-btn" onclick="closeTxModal()">取消</button>
   </div>
@@ -366,6 +378,7 @@ input[type=checkbox]{accent-color:var(--accent)}
       <button class="cancel-btn" onclick="importCSV();closeMore()" style="margin:0">📥 导入CSV</button>
       <button class="cancel-btn" onclick="importFromClipboard();closeMore()" style="margin:0">📋 从剪贴板导入</button>
       <button class="cancel-btn" onclick="openImportNotify();closeMore()" style="margin:0">📲 导入通知</button>
+      <button class="cancel-btn" onclick="openRecon();closeMore()" style="margin:0">⚖️ 余额对账（查漏记）</button>
     </div>
     <button class="cancel-btn" onclick="closeMore()" style="margin-top:8px">关闭</button>
   </div>
@@ -388,9 +401,19 @@ input[type=checkbox]{accent-color:var(--accent)}
     <div id="importNotifyList" style="max-height:44vh;overflow-y:auto;margin-bottom:10px"></div>
     <button class="submit" onclick="doImportScan()">🔍 扫描（通知+短信）</button>
     <button class="submit" id="importConfirmBtn" onclick="doImportConfirm()" style="display:none">✓ 确认入账</button>
+    <button class="cancel-btn" onclick="analyzeAll()" style="margin-top:4px;font-size:12px;opacity:.7">全量分析（哪些没识别到）</button>
+    <button class="cancel-btn" onclick="selfTestParse()" style="margin-top:4px;font-size:12px;opacity:.7">解析自测（不用付钱）</button>
     <button class="cancel-btn" onclick="showImpDiag()" style="margin-top:4px;font-size:12px;opacity:.7">诊断（看原始数据）</button>
     <button class="cancel-btn" onclick="clearHandled();ts('已清空「已处理」记录，下次扫描会重新判定')" style="margin-top:4px;font-size:12px;opacity:.7">清空已处理记录</button>
     <button class="cancel-btn" onclick="closeImportNotify()" style="margin-top:4px">关闭</button>
+  </div>
+</div>
+
+<div class="modal" id="reconModal">
+  <div class="sheet"><h3>余额对账</h3>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.6">填一下各账户的<b>真实余额</b>（打开微信/银行App看一眼），系统会告诉你差多少 —— <b>差额就是漏记的金额</b>。</div>
+    <div id="reconList" style="max-height:46vh;overflow-y:auto;margin-bottom:10px"></div>
+    <button class="cancel-btn" onclick="document.getElementById('reconModal').classList.remove('show')">关闭</button>
   </div>
 </div>
 
@@ -533,7 +556,7 @@ input[type=checkbox]{accent-color:var(--accent)}
 // ── State ──
 const SK='minis_bookkeeping_v5',BK='minis_budget_v3',AK='minis_accounts_v2',BGK='minis_bg_v1',IK='minis_invest_v1';
 let cm=new Date().toISOString().slice(0,7),ct='expense',cv='tx',eid=null,sq='';
-const DA=['微信','银行卡','应急金','花呗'];
+const DA=['微信','银行卡','应急金','规划金','花呗'];
 const CATS=['餐饮','购物','医疗','交通','固定支出','其他'];
 const INC_CATS=['工资/月薪','工资/奖金','理财/基金收益','理财/股息','理财/利息','报销/工作报销','红包/转账','兼职/外快','退款','其他'];
 const CC={'餐饮':'#c0392b','购物':'#b8943e','交通':'#5b9eb5','固定支出':'#8b7aaa','医疗':'#d4735a','工资':'#3c7a44','理财':'#b8860b','报销':'#5b9eb5','红包':'#e67e22','兼职':'#8e44ad','退款':'#7f8c8d','其他':'#8899a6'};
@@ -560,6 +583,21 @@ function openInvEdit(name){
   invEditName=name;const a=gi().find(x=>x.name===name);
   document.getElementById('invEditTitle').textContent=name;
   document.getElementById('invEditAmount').value=a?a.amount:'';
+  // ★ 场外账户：提示"填总数、系统自动减规划金"，并实时显示纯理财
+  try{
+    const isOut=/场外/.test(name)&&(!a||a.ours!==false);
+    let box=document.getElementById('invPlanHint');
+    if(!box){
+      const inp=document.getElementById('invEditAmount');
+      box=document.createElement('div');
+      box.id='invPlanHint';
+      box.style.cssText='font-size:12px;color:var(--text2);margin-top:6px;line-height:1.6';
+      inp.parentNode.insertBefore(box, inp.nextSibling);
+      inp.addEventListener('input',updateInvPlanHint);
+    }
+    box.style.display=isOut?'block':'none';
+    updateInvPlanHint();
+  }catch(e){}
   // 历史记录
   const hp=document.getElementById('invHistory');
   const his=(a&&a.his)||[];
@@ -573,6 +611,18 @@ function openInvEdit(name){
   document.getElementById('invEditModal').classList.add('show');
 }
 function closeInvEdit(){document.getElementById('invEditModal').classList.remove('show');invEditName=''}
+// 场外理财：填"理财通里看到的总数"，系统自动减去规划金 → 纯理财
+function updateInvPlanHint(){
+  const box=document.getElementById('invPlanHint');
+  if(!box||box.style.display==='none') return;
+  const plan=(getCashBalances()['规划金']||0);
+  const v=parseFloat((document.getElementById('invEditAmount')||{}).value);
+  if(!(plan>0)){ box.innerHTML='（还没有「规划金」余额；每月转账记进「规划金」账户后，这里会自动减）'; return; }
+  const pure=isNaN(v)?null:(v-plan);
+  box.innerHTML='填<b>理财通里看到的总数</b>即可，系统自动减：<br>'
+    +'总数 '+(isNaN(v)?'—':('¥'+v.toFixed(2)))+' − 规划金 ¥'+plan.toFixed(2)
+    +' = <b style="color:var(--accent)">'+(pure==null?'—':('¥'+pure.toFixed(2)))+'</b>（纯理财）';
+}
 function saveInvEdit(){
   const v=parseFloat(document.getElementById('invEditAmount').value);
   if(isNaN(v))return ts('请输入有效金额');
@@ -670,7 +720,7 @@ function rtx(){
       }
     }
     return `<div class="tx-item" style="animation-delay:${i*55}ms" onclick="editTx('${t.id}')">
-      <div class="info"><div class="title">${t.note||(isT?'转账':isE?'支出':'收入')}${isT&&t.fee?`<span style="font-size:11px;color:var(--text3)"> 手续费 ¥${t.fee.toFixed(2)}(${t.feePayer==='to'?'转入方付':'转出方付'})</span>`:''}</div><div class="meta">${d.getMonth()+1}/${d.getDate()} · ${isT?t.from+' → '+t.to:[t.account,t.category].filter(Boolean).join(' · ')}</div>${balHtml}</div>
+      <div class="info"><div class="title">${t.note||(isT?'转账':isE?'支出':'收入')}${isT&&t.fee?`<span style="font-size:11px;color:var(--text3)"> 手续费 ¥${t.fee.toFixed(2)}(${t.feePayer==='to'?'转入方付':'转出方付'})</span>`:''}${t.auto?'<span class="auto-tag">自动</span>':''}${t.instGroup?`<span class="auto-tag" style="color:var(--gold)">分期${t.instIdx}/${t.instTotal}</span>`:''}</div><div class="meta">${d.getMonth()+1}/${d.getDate()} · ${isT?t.from+' → '+t.to:[t.account,t.category].filter(Boolean).join(' · ')}</div>${balHtml}</div>
       <div class="amount ${isE?'exp':isI?'inc':''}" style="${isT?'color:var(--gold)':''}">${sign}¥${t.amount.toFixed(2)}</div>
       <div class="del-btn" onclick="event.stopPropagation();delTx('${t.id}')">×</div>
     </div>`;
@@ -755,14 +805,22 @@ function rac(){
   }).join('');
   // Investment accounts
   const inv=gi();let invTotal=0;
+  const planBal=(getCashBalances()['规划金']||0);   // 规划金余额（由流水自动算）
   document.getElementById('invList').innerHTML=inv.map(a=>{
-    if(a.ours!==false)invTotal+=a.amount||0;
+    // ★ 场外"含规划金"：理财通里看到的总数包含了规划金，
+    //   这里自动减掉规划金，显示【纯理财】——用户不必自己心算减法。
+    const hasPlan=/场外/.test(a.name)&&a.ours!==false&&planBal>0;
+    const pure=hasPlan?((a.amount||0)-planBal):(a.amount||0);
+    if(a.ours!==false)invTotal+=(hasPlan?pure:(a.amount||0));   // 计入总资产时用纯理财，避免规划金重复计算
     const m=a.month?`<span style="font-size:11px;color:var(--text3);margin-left:4px">${a.month}</span>`:'<span style="font-size:11px;color:var(--gold);margin-left:4px">未更新</span>';
     const tag=a.ours===false?'<span style="font-size:10px;color:var(--text3);margin-left:4px;background:var(--bg);padding:1px 5px;border-radius:8px">不计入</span>':'';
-    return `<div class="acct-item" onclick="openInvEdit('${a.name}')" style="cursor:pointer">
-      <span class="acct-name">${a.name}${tag}${m}</span>
-      <span class="acct-val" style="color:${a.amount>0?'var(--green)':'var(--text2)'}">¥${(a.amount||0).toLocaleString()}</span>
-      <span onclick="event.stopPropagation();deleteInv('${a.name.replace(/'/g,"\\'")}')" style="color:var(--text3);margin-left:8px;cursor:pointer;font-size:14px;padding:0 4px">×</span>
+    const sub=hasPlan?`<div style="font-size:11px;color:var(--text3);margin-top:2px">含规划金 ¥${(a.amount||0).toLocaleString()} − 规划金 ¥${planBal.toFixed(2)} = <b style="color:var(--accent)">纯理财 ¥${pure.toFixed(2)}</b></div>`:'';
+    return `<div class="acct-item acct-col" onclick="openInvEdit('${a.name}')" style="cursor:pointer">
+      <div style="display:flex;align-items:center;width:100%">
+        <span class="acct-name">${a.name}${tag}${m}</span>
+        <span class="acct-val" style="color:${pure>0?'var(--green)':'var(--text2)'}">¥${pure.toLocaleString()}</span>
+        <span onclick="event.stopPropagation();deleteInv('${a.name.replace(/'/g,"\\'")}')" style="color:var(--text3);margin-left:8px;cursor:pointer;font-size:14px;padding:0 4px">×</span>
+      </div>${sub}
     </div>`;
   }).join('');
   // Total row
@@ -801,6 +859,30 @@ function saveTx(){
   else{entry.account=document.getElementById('txAcctBtn').textContent;entry.category=document.getElementById('txCatBtn').textContent;if(entry.account==='账户')entry.account='';if(entry.category==='分类')entry.category=''}
   // 针对已有交易(编辑)先回滚理财金额
   if(eid){const old=data.find(t=>t.id===eid);if(old&&old.type==='transfer'){applyInvDelta(old.from,-old.amount);applyInvDelta(old.to,old.amount)}}
+  // ★ 分期：支出可分 N 期，自动分摊到往后各月（花呗/信用卡分期的正确记法）
+  //    总额不变，只是把"当月一次性"摊成每月一笔，流水标注（分期 n/N）
+  let periods=1;
+  try{ periods=parseInt((document.getElementById('txInstallment')||{}).value,10)||1; }catch(e){ periods=1; }
+  if(ct==='expense' && !eid && periods>1){
+    const gid=uid();
+    const base=Math.floor(a*100/periods)/100;          // 每期金额（分位取整）
+    const ymd=d.split('-').map(Number);
+    let acc=0;
+    for(let i=0;i<periods;i++){
+      let amt;
+      if(i===periods-1){ amt=Math.round((a-acc)*100)/100; }   // 末期吸收尾差，保证总额准确
+      else { amt=base; acc+=base; }
+      const dt=new Date(ymd[0],(ymd[1]-1)+i,ymd[2]);          // 逐月顺延
+      const ds=dt.toISOString().slice(0,10);
+      data.push({id:uid(),time:ds+'T12:00:00',type:'expense',amount:amt,
+                 note:(n?n+' ':'')+'（分期 '+(i+1)+'/'+periods+'）',
+                 account:entry.account,category:entry.category,
+                 instGroup:gid,instIdx:i+1,instTotal:periods});
+    }
+    stx(data);closeTxModal();ra();
+    ts('已分 '+periods+' 期，每月 ¥'+base.toFixed(2)+'（共 ¥'+a.toFixed(2)+'）');
+    return;
+  }
   if(eid){const i=data.findIndex(t=>t.id===eid);if(i>=0)Object.assign(data[i],entry)}else data.push(entry);
   stx(data);
   // 转账涉及理财账户 → 联动更新理财账户余额
@@ -823,7 +905,7 @@ async function delTx(id){
   if(old&&old.type==='transfer'){applyInvDelta(old.from,old.amount);applyInvDelta(old.to,-old.amount)}
   stx(atx().filter(t=>t.id!==id));ra();ts('已删除');
 }
-function st2(type,btn){ct=type;document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const isT=type==='transfer';document.getElementById('txCatRow').style.display=isT?'none':'flex';document.getElementById('txTransferRow').style.display=isT?'flex':'none';document.getElementById('txFeeRow').style.display=isT?'flex':'none';document.getElementById('txSubmit').textContent=isT?'确认转账':type==='expense'?'确认支出':'确认收入';document.getElementById('txCatBtn').textContent='分类';document.getElementById('txCatBtn').classList.remove('selected')}
+function st2(type,btn){ct=type;document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const isT=type==='transfer';document.getElementById('txCatRow').style.display=isT?'none':'flex';document.getElementById('txTransferRow').style.display=isT?'flex':'none';document.getElementById('txFeeRow').style.display=isT?'flex':'none';document.getElementById('txInstRow').style.display=(type==='expense')?'flex':'none';document.getElementById('txSubmit').textContent=isT?'确认转账':type==='expense'?'确认支出':'确认收入';document.getElementById('txCatBtn').textContent='分类';document.getElementById('txCatBtn').classList.remove('selected')}
 
 // ── Picker ──
 let pT='',pS='';
@@ -1271,22 +1353,49 @@ function closeImportNotify(){document.getElementById('importNotifyModal').classL
 
 // ── 诊断：把"为什么没抓到"摊开给用户看 ──
 let __impRaw={notif:[],sms:[],nNotif:0,nSms:0,nRecent:0,nPay:0,lastScan:''};
+// 读服务留下的运行证据（key=value 文本），重启不丢，无法被"猜"掩盖
+function readEvidence(){
+  const ev={};
+  try{
+    if(window.MinisBridge && typeof window.MinisBridge.notifEvidence==='function'){
+      const s=window.MinisBridge.notifEvidence()||'';
+      s.split('\n').forEach(line=>{
+        const i=line.indexOf('=');
+        if(i>0) ev[line.slice(0,i)]=line.slice(i+1);
+      });
+    }
+  }catch(e){}
+  return ev;
+}
+function agoText(ts){
+  const t=Number(ts||0); if(!t) return '从未';
+  const s=Math.floor((Date.now()-t)/1000);
+  if(s<60) return s+'秒前';
+  if(s<3600) return Math.floor(s/60)+'分钟前';
+  if(s<86400) return Math.floor(s/3600)+'小时前';
+  return Math.floor(s/86400)+'天前';
+}
 function impStatusText(){
   const parts=[];
+  let granted=null;
   try{
     if(window.MinisBridge && typeof window.MinisBridge.notifStatus==='function'){
       const o=JSON.parse(window.MinisBridge.notifStatus()||'{}');
-      parts.push('通知读取 '+(o.granted?'已授权':'未授权'));
-      parts.push('服务 '+(o.connected?'已连接':'未连接'));
+      granted=o.granted;
+      parts.push('通知权 '+(o.granted?'已开':'未开'));
       parts.push('队列 '+o.queue+'条');
-      // 已授权但服务没连上 → 主动请求重连（"用一次就死"多因被系统解绑）
-      if(o.granted && !o.connected && typeof window.MinisBridge.requestRebind==='function'){
-        try{ window.MinisBridge.requestRebind(); }catch(e){}
-      }
     }
-  }catch(e){ parts.push('状态读取失败'); }
-  parts.push('短信读到 '+__impRaw.nSms+'条');
-  if(__impRaw.lastScan) parts.push('上次 '+__impRaw.lastScan);
+  }catch(e){}
+  const ev=readEvidence();
+  const seen=(Number(ev.notifPay||0)+Number(ev.notifNonPay||0));
+  if(ev.lastNotifTs){
+    parts.push('收到通知 '+seen+'条(支付类'+Number(ev.notifPay||0)+')·最近'+agoText(ev.lastNotifTs));
+  } else {
+    parts.push('收到通知 0条');
+  }
+  parts.push('服务连过 '+Number(ev.connectCount||0)+'次');
+  if(ev.lastScanTs) parts.push('扫通知栏 '+Number(ev.lastScanActive||0)+'条');
+  parts.push('短信 '+__impRaw.nSms+'条');
   return parts.join(' · ');
 }
 function refreshImpStatus(){
@@ -1294,25 +1403,44 @@ function refreshImpStatus(){
   if(el) el.textContent=impStatusText();
   const hint=document.getElementById('impConnHint');
   if(!hint) return;
-  let need=false, msg='';
+  let granted=null;
   try{
     if(window.MinisBridge && typeof window.MinisBridge.notifStatus==='function'){
-      const o=JSON.parse(window.MinisBridge.notifStatus()||'{}');
-      if(!o.granted){
-        need=true;
-        msg='「通知使用权」没开 → 收不到任何支付通知（只靠短信会漏掉5G消息）。';
-      } else if(!o.connected){
-        need=true;
-        msg='通知服务【未连接】——系统把服务解绑了，所以新通知进不来（这就是"用一次就失灵"的原因）。点下面按钮重连；若无效，去设置里把「记账」的通知使用权关掉再打开。';
-        if(typeof window.MinisBridge.requestRebind==='function'){
-          try{ window.MinisBridge.requestRebind(); }catch(e){}
-        }
-      }
+      granted=JSON.parse(window.MinisBridge.notifStatus()||'{}').granted;
     }
   }catch(e){}
+  const ev=readEvidence();
+  let need=false, msg='';
+  const connCnt=Number(ev.connectCount||0);
+  if(granted===false){
+    need=true;
+    msg='「通知使用权」没开 → 收不到任何支付通知（短信库里没有的5G消息也收不到）。';
+  } else if(connCnt===0){
+    // 【最常见】权限给了，但系统从未绑定服务。
+    // 原因1：清单 exported=false（v1.18前）→ 系统绑不上，本版已修
+    // 原因2：装/更新后 Android 不会自动重新绑定 → 必须把通知使用权【关掉再打开】
+    need=true;
+    msg='系统从未绑定过通知服务（权限虽已开，但没连上）——这一条搞定就能收通知：\n'
+       +'打开下面的「通知设置」→ 把「记账」的开关【关掉】→ 等 2 秒 →【再打开】，然后回到本页点「重连通知服务」。';
+  } else if(ev.lastScanNull==='1'){
+    need=true;
+    msg='系统把通知服务解绑了（扫描通知栏返回 null）——点「重连通知服务」；无效就把通知使用权关掉再打开。';
+  } else if(granted && !ev.lastNotifTs){
+    need=true;
+    msg='服务已连上但还没收到过任何通知。若明明有通知却一直为空，请给「记账」打开「后台高耗电」「允许自启动」。';
+  } else if(granted && ev.lastNotifTs && (Date.now()-Number(ev.lastNotifTs))>2*3600*1000){
+    // ★ 关键一档：服务曾经连过、也收到过通知，但【很久没动静了】。
+    //   手机天天有通知，超过 2 小时没收到 = 服务被系统冻结了（国产ROM 常见）。
+    //   这不是代码问题，必须用户去开后台保活。
+    need=true;
+    msg='通知服务已停摆 '+agoText(ev.lastNotifTs)+'（手机天天有通知，不该这么久没动静）——'
+       +'系统在后台把「记账」冻结了，通知收不到。\n请到 系统设置 里给「记账」打开：\n'
+       +'  · 后台高耗电 / 允许后台运行\n  · 自启动\n  · 电池 → 不受限制\n'
+       +'设置后回到本页点「重连通知服务」。'
+  }
   hint.style.display=need?'block':'none';
   if(need){
-    hint.innerHTML=msg+'<div style="margin-top:6px;display:flex;gap:8px">'
+    hint.innerHTML=msg+'<div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap">'
       +'<button onclick="reconnectNotif()" style="background:#e55;border:none;border-radius:6px;color:#fff;font-size:12px;padding:5px 10px">重连通知服务</button>'
       +'<button onclick="if(window.MinisBridge)window.MinisBridge.openNotifSettings()" style="background:none;border:1px solid #e55;border-radius:6px;color:#e55;font-size:12px;padding:5px 10px">打开通知设置</button>'
       +'</div>';
@@ -1325,51 +1453,136 @@ function reconnectNotif(){
   ts('已请求重连，2秒后自动重新检测…');
   setTimeout(()=>{ refreshImpStatus(); doImportScan(); }, 2000);
 }
+function selfTestParse(){
+  // 不用付钱就能验证：把常见的真实通知文本喂进解析链路，看能不能出金额
+  const samples=[
+    ['工行短信','尾号2374卡9月19日20:43支出(消费支付宝-杭州深度求索人工智能基础技…)20元，余额169.10元'],
+    ['工行(只有余额，应剔除)','【工商银行】您尾号2374卡，余额1823.44元'],
+    ['微信支付','微信支付：已支付¥15.80'],
+    ['支付宝','你已成功付款 25.00 元'],
+    ['建行收入','您尾号1234的储蓄卡账户9月20日14时30分收入人民币100.00元，余额500.00元'],
+    ['招行支出','您账户1234于09月20日14:30网上支付人民币-35.50'],
+    ['农行消费','您尾号8899卡09月20日15:20消费人民币68.00元'],
+    ['云闪付','【云闪付】您尾号3344的银行卡消费12.50元'],
+    ['验证码(应剔除)','验证码123456，5分钟内有效，请勿泄露'],
+    ['营销(应剔除)','【银行】办卡享好礼，额度5万元，回复TD退订'],
+  ];
+  let out='【解析自测】\n注意：这里只测"文本 → 金额"这一步；能不能收到，看上面服务证据。\n\n';
+  let okN=0, badN=0;
+  samples.forEach(function(s){
+    const name=s[0], text=s[1];
+    const isPay=looksLikePaymentText(text);
+    let r=[];
+    try{ r=parseNotifFull({title:'',text:text,app:'',time:Date.now()}); }catch(e){}
+    // 预期：标「应剔除」的必须判为非支付；其余必须判为支付且解析出金额
+    const expectPay = !/应剔除/.test(name);
+    const good = expectPay ? (isPay && r.length>0) : !isPay;
+    if(good) okN++; else badN++;
+    out+=(good?'✅ ':'❌ ')+name+'：'+(isPay?'判为支付':'判为非支付')
+       +' → '+(r.length?r.map(function(x){return '¥'+x.amount+' '+(x.type==='income'?'收入':'支出')+'/'+x.category;}).join('、'):'未解析出金额')+'\n';
+  });
+  out+='\n合计：✅ '+okN+' 项正常'+(badN?('，❌ '+badN+' 项有问题 —— 请把本屏截图发我'):'（全部正常）');
+  const st=document.getElementById('importNotifyStatus');
+  st.style.display='block';
+  st.textContent=out;
+  document.getElementById('importNotifyList').innerHTML='';
+  return out;
+}
+// ── 全量分析：把手机里所有短信/通知过一遍，看清到底卡在哪一步 ──
+function analyzeAll(){
+  const BR='\n────────────────\n';
+  let out='【全量分析】把手机里所有短信都过一遍，看卡在哪一步\n';
+  let sms=[];
+  try{
+    if(window.MinisBridge && typeof window.MinisBridge.readSms==='function'){
+      sms=JSON.parse(window.MinisBridge.readSms()||'[]');
+    }
+  }catch(e){ sms=[]; }
+  if(!Array.isArray(sms)) sms=[];
+  const cut=Date.now()-IMP_TTL;
+  const recent=sms.filter(s=>s.date&&s.date>=cut);
+  let pay=0, parsed=0, noise=0;
+  const payNoAmt=[], noiseTop=[];
+  const noiseKind={验证码:0, 营销:0, 催缴:0, 物流:0, 通知类:0};
+  recent.forEach(s=>{
+    const b=(s.body||'').replace(/\s+/g,' ');
+    if(looksLikePaymentText(b)){
+      pay++;
+      let r=[]; try{ r=parseNotifFull({title:'',text:b,app:s.address||'',time:s.date}); }catch(e){}
+      if(r.length) parsed++;
+      else if(payNoAmt.length<6) payNoAmt.push(b.slice(0,70));
+    }else{
+      noise++;
+      if(/验证码|校验码|动态码|取件码/.test(b)) noiseKind.验证码++;
+      else if(/退订|优惠|特惠|办卡|贷款|抽奖/.test(b)) noiseKind.营销++;
+      else if(/余额不足|欠费|请及时|应缴|应还/.test(b)) noiseKind.催缴++;
+      else if(/快递|包裹|派送|物流/.test(b)) noiseKind.物流++;
+      else noiseKind.通知类++;
+      if(noiseTop.length<3) noiseTop.push(b.slice(0,50));
+    }
+  });
+  out+='短信：共 '+sms.length+' 条，近7天 '+recent.length+' 条\n';
+  out+=' · 判为支付：'+pay+' 条，其中解析出金额 '+parsed+' 条\n';
+  out+=' · 判为非支付：'+noise+' 条（验证码'+noiseKind.验证码+'/营销'+noiseKind.营销+'/催缴'+noiseKind.催缴+'/物流'+noiseKind.物流+'/其他通知'+noiseKind.通知类+'）\n';
+  if(payNoAmt.length) out+='\n⚠ 判为支付、但解析不出金额（漏账源头，请发我）：\n · '+payNoAmt.join('\n · ')+'\n';
+  if(noiseTop.length) out+='\n剔除样本（确认没误杀）：\n · '+noiseTop.join('\n · ')+'\n';
+
+  out+=BR;
+  // 通知：已入队=判为支付；再看被滤掉的样本，确认没误杀
+  out+='通知：当前队列 '+Number(__impRaw.nNotif||0)+' 条（判为支付才入队）\n';
+  if(__impRaw.notif && __impRaw.notif.length){
+    out+=' · '+__impRaw.notif.join('\n · ')+'\n';
+  }
+  const ev=readEvidence();
+  let any=false, fl=[];
+  for(let i=1;i<=5;i++){
+    const v=ev['filtered_'+i];
+    if(v){ any=true; fl.push(v); }
+  }
+  if(any){
+    out+='\n被滤掉的通知样本（若银行通知出现在这里=我误判了，请发我）：\n · '+fl.join('\n · ')+'\n';
+  } else {
+    out+='\n（暂无被滤掉的通知样本）\n';
+  }
+  const st=document.getElementById('importNotifyStatus');
+  st.style.display='block';
+  st.textContent=out;
+  document.getElementById('importNotifyList').innerHTML='';
+  return out;
+}
 function showImpDiag(){
   const st=document.getElementById('importNotifyStatus');
   st.style.display='block';
-  let s=impStatusText();
-  s+='\n\n【通知队列 '+__impRaw.nNotif+' 条】';
+  const ev=readEvidence();
+  let s='';
+  // 环境自检：系统眼里的"我"到底是什么样（判断"绑不上"是清单问题还是系统问题）
+  try{
+    if(window.MinisBridge && typeof window.MinisBridge.selfCheck==='function'){
+      const c=JSON.parse(window.MinisBridge.selfCheck()||'{}');
+      s+='【环境自检】\n';
+      s+='  · 清单允许系统连接服务(exported)：'+(c.exported==='true'?'✅ 是':'❌ '+(c.exported==='false'?'否 —— 清单写错了，这是绑不上的原因':'读取失败('+c.exported+')'))+'\n';
+      s+='  · 系统「通知使用权」列表含本应用：'+(c.inList?'✅ 是':'❌ 否 —— 需要去设置里打开')+'\n';
+      s+='  · 系统记录的原始值：'+(c.raw?c.raw:'(空)')+'\n\n';
+    }
+  }catch(e){}
+  s+='【服务运行证据】（这些是服务自己记的，重启不丢）\n';
+  s+='收到通知：支付类 '+Number(ev.notifPay||0)+' 条 / 非支付 '+Number(ev.notifNonPay||0)+' 条\n';
+  s+='最近一条：'+(ev.lastNotifTs?(agoText(ev.lastNotifTs)+'（'+(ev.lastNotifApp||'?')+'）'):'从未收到')+'\n';
+  s+='服务连接：'+Number(ev.connectCount||0)+' 次，最近 '+(ev.lastConnectTs?agoText(ev.lastConnectTs):'无')+'\n';
+  s+='被解绑：'+Number(ev.disconnectCount||0)+' 次，最近 '+(ev.lastDisconnectTs?agoText(ev.lastDisconnectTs):'无')+'\n';
+  s+='扫描通知栏：'+Number(ev.scanCount||0)+' 次，最近一次看到 '+Number(ev.lastScanActive||0)+' 条通知';
+  s+= (ev.lastScanNull==='1') ? '  ⚠返回null=服务未被系统绑定\n' : '\n';
+  if(ev.lastTriggerErr) s+='触发扫描报错：'+ev.lastTriggerErr+'\n';
+  s+='\n'+impStatusText();
+  s+='\n\n【本轮队列 '+__impRaw.nNotif+' 条】';
   s+= __impRaw.notif.length ? ('\n'+__impRaw.notif.join('\n'))
-                            : '\n(空 —— 通知服务没抓到。看上面"服务/授权"状态)';
+                            : '\n(空)';
   s+='\n\n【短信共 '+__impRaw.nSms+' 条，近7天 '+__impRaw.nRecent+' 条，原文样本】';
   s+= __impRaw.sms.length ? ('\n'+__impRaw.sms.join('\n'))
                           : '\n(空 —— 未授权读取短信，或短信库为空)';
   st.textContent=s;
 }
-// 从原始支付通知文本解析出记账项（金额/收支/分类/账户）
-function parseNotif(n){
-  const s=(n.title||'')+' '+(n.text||'')+(n.app||'');
-  // 提取金额：支持 ¥15.90、-13.80、支出 15.90 等
-  let amt=null;
-  let m=s.match(/[¥￥]\s?(\d+(?:\.\d{1,2})?)/);
-  if(m){amt=parseFloat(m[1]);}
-  else{
-    m=s.match(/(\d+(?:\.\d{1,2})?)\s?元/);
-    if(m)amt=parseFloat(m[1]);
-    else{m=s.match(/[－-]\s?(\d+(?:\.\d{1,2})?)/); if(m)amt=parseFloat(m[1]);}
-  }
-  if(amt==null) return null;
-  let type='expense';
-  const income=/收入|入账|收款|到账|存入|退回|退款|转入|红包|工资|收益/.test(s);
-  const expense=/支出|消费|付款|支付|已支出|扣款|转入[^收]|消费|转出|缴费|还款/.test(s);
-  const lower=s.toLowerCase();
-  const refund=/退款|退回|退货|取消/.test(s);
-  if(refund) type='income';
-  else if(income && !/支出|消费|付款|转出/.test(s)) type='income';
-  let category='其他';
-  if(/餐饮|吃饭|美团|饿了么|餐厅|外卖|超市|便利店|买菜|零食|奶茶|咖啡/.test(s)) category='餐饮';
-  else if(/淘宝|天猫|京东|拼多多|购物|商城|消费|购买/.test(s)) category='购物';
-  else if(/话费|流量|充值|移动|联通|电信/.test(s)) category='话费';
-  else if(/地铁|公交|打车|滴滴|车票|加油|停车|高速|铁路|航空/.test(s)) category='交通';
-  else if(/还款|信用卡|花呗|借呗|白条/.test(s)) category='还款';
-  else if(/工资|转账|红包|转入|收款|收入/.test(s)) category='其他';
-  let account='';
-  if(/支付宝/.test(s)) account='支付宝';
-  else if(/微信|财付通/.test(s)) account='微信';
-  else if(/银行卡|银行|招商|工商|建设|农业|中国银行/.test(s)) account='银行卡';
-  return {amount:amt, type:type, category:category, account:account, note:s.slice(0,40)};
-}
+
 // ── 待处理框 Payment Inbox ──────────────────────────────
 // 完整规则（面向长期，不只看眼前）：
 //   ① 只放【纯支付信息】：非支付的通知/短信，扫描时判掉 → 从源删除 + 持久标记 → 永不再出现
@@ -1406,6 +1619,18 @@ function loadHandled(){
   const cut=Date.now()-IMP_TTL;
   let arr=stateRead(BOX_HANDLED_KEY); if(!Array.isArray(arr)) arr=[];
   arr=arr.filter(x=>x&&x.k&&x.ts>=cut);
+  // 一次性迁移：旧版本把"忽略"存在 localStorage(IMP_SKIP_KEY)，整合进本集合，保住用户先前的忽略意图
+  try{
+    const legacy=JSON.parse(localStorage.getItem(IMP_SKIP_KEY)||'[]');
+    if(Array.isArray(legacy)&&legacy.length){
+      const have=new Set(arr.map(x=>x.k));
+      let moved=0;
+      legacy.forEach(k=>{ if(k&&!have.has('n:'+k)&&!have.has(k)){ arr.push({k:k,ts:Date.now()}); moved++; } });
+      if(moved) stateWrite(BOX_HANDLED_KEY,arr);
+      localStorage.removeItem(IMP_SKIP_KEY);
+      console.log('[记账] 已迁移旧忽略记录', moved, '条');
+    }
+  }catch(e){}
   HANDLED_ARR=arr; HANDLED=new Set(arr.map(x=>x.k));
   return HANDLED;
 }
@@ -1423,25 +1648,35 @@ function unmarkHandled(key){
 function clearHandled(){ HANDLED=new Set(); HANDLED_ARR=[]; stateWrite(BOX_HANDLED_KEY,[]); }
 
 // ---- 已清除区（灰显留存 7 天，可恢复）----
-// 已清除区：同一 key 只保留最新一条（原来重复清除会堆积成 4 条一模一样的）
+// 稳定去重键：不依赖 _boxKey/finger（旧版本存的记录没有这些字段，会导致同一笔堆成好几条）
+function dismissKey(t){
+  if(!t) return '';
+  const k=entryKey(t);
+  if(k) return k;
+  const d=new Date(t._smsDate||t._time||0);
+  const day=isNaN(d.getTime())?'?':d.toISOString().slice(0,10);
+  return [t._src||'', Number(t.amount||0).toFixed(2), (t.note||'').replace(/\s+/g,'').slice(0,24), day].join('|');
+}
+// 已清除区：同一笔只保留一条（原来重复清除会堆积成 4 条一模一样的）
 function loadDismissed(){
   const cut=Date.now()-IMP_TTL;
   let arr=stateRead(BOX_DISMISS_KEY); if(!Array.isArray(arr)) arr=[];
   const seen={}, kept=[];
   for(const d of arr){
     if(!d||!d.t||!(d.ts>=cut)) continue;
-    const k=entryKey(d.t)||d.t.finger||JSON.stringify(d.t).slice(0,60);
-    if(seen[k]) continue;          // 重复的丢掉（保留最早那条的 ts）
-    seen[k]=1; kept.push(d);
+    const k=dismissKey(d.t);
+    if(k&&seen[k]) continue;
+    if(k) seen[k]=1;
+    kept.push(d);
   }
   if(kept.length!==arr.length) stateWrite(BOX_DISMISS_KEY,kept);
   return kept;
 }
-// 加进「已清除」：同 key 已在则不再重复添加
+// 加进「已清除」：同一笔已在则不再重复添加
 function addDismissed(t){
   const dis=loadDismissed();
-  const k=entryKey(t)||t.finger||'';
-  if(k && dis.some(d=>(entryKey(d.t)||d.t.finger||'')===k)) return dis;   // 已有 → 不重复
+  const k=dismissKey(t);
+  if(k && dis.some(d=>dismissKey(d.t)===k)) return dis;
   dis.push({ts:Date.now(),t:t});
   saveDismissed(dis);
   return dis;
@@ -1503,8 +1738,22 @@ function renderImpList(){
   const st=document.getElementById('importNotifyStatus');
   const cb=document.getElementById('importConfirmBtn');
   const dis=loadDismissed();
+  const alog=loadAutoLog();
   let html='';
   if(impTx.length) html+=impTx.map((t,i)=>impRowHtml(t,i)).join('');
+  // ── 已自动入账（必须显眼：否则用户以为"没识别到"）──
+  if(alog.length){
+    const recent=alog.slice().reverse().slice(0,12);
+    html+=`<div style="margin-top:12px;padding-top:8px;border-top:1px dashed var(--border);display:flex;align-items:center;gap:8px">
+        <span style="flex:1;font-size:12px;color:#2a9d5c">✅ 已自动入账 ${alog.length} 笔（已在流水，无需确认）</span>
+        <button onclick="clearAutoLog();renderImpList()" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text2);font-size:11px;padding:3px 8px;cursor:pointer">清空</button>
+      </div>`
+      + recent.map(a=>`<div style="display:flex;padding:5px 0;gap:8px;font-size:12px;color:var(--text2)">
+          <span style="width:64px;text-align:right;font-weight:600;color:var(--text)">¥${Number(a.amount).toFixed(2)}</span>
+          <span style="flex:1">${a.type==='income'?'收入':'支出'} · ${a.category||''}${a.account?' · '+a.account:''}<br><span style="opacity:.75">${(a.note||'').replace(/</g,'&lt;')}</span></span>
+          <span style="opacity:.6;white-space:nowrap">${new Date(a.ts).toLocaleTimeString().slice(0,5)}</span>
+        </div>`).join('');
+  }
   if(dis.length){
     html+=`<div style="margin-top:12px;padding-top:8px;border-top:1px dashed var(--border);display:flex;align-items:center;gap:8px">
         <span style="flex:1;font-size:12px;color:var(--text2)">已清除（灰显留存 7 天，可恢复）</span>
@@ -1520,7 +1769,9 @@ function renderImpList(){
   if(impTx.length){ st.style.display='none'; cb.style.display='block'; }
   else{
     st.style.display='block'; cb.style.display='none';
-    st.textContent = dis.length ? '框中暂无待入账支付信息（下方为已清除留存）。' : (window.__impDiag||'未发现支付信息。请保留银行/微信/支付宝的支付通知或短信后重新扫描。');
+    if(dis.length) st.textContent='框中暂无待入账支付信息（下方为已清除留存）。';
+    else if(alog.length) st.textContent='框中暂无待确认的支付（下方是已自动入账的记录）。';
+    else st.textContent = window.__impDiag||'未发现支付信息。请保留银行/微信/支付宝的支付通知或短信后重新扫描。';
   }
 }
 function undelImpItem(i){
@@ -1529,6 +1780,97 @@ function undelImpItem(i){
   unmarkHandled(entryKey(d.t));     // 撤销「已处理」标记 → 允许它回到框中
   impTx.push(d.t); renderImpList(); ts('已恢复');
 }
+// ── 智能配对去重 ────────────────────────────────────────
+// ① 同一 key（同一条通知/短信）→ 去重
+// ② 金额完全相同 + 同类型 + 10分钟内 → 视为重复（银行短信 + 银行App推送）
+// ③ ★【面额 vs 实付】充值/缴费短信写的是面额(如充100)，银行短信写的是实付(如扣96)：
+//    同一时间窗内两者是【同一笔交易】，必须合并成一条，金额取【实付】。
+//    否则会出现「充100 + 扣96 = 196，实际只花96」的重复记账。
+function isRechargeItem(e){
+  const acc=(e&&e.account)||'';
+  const note=(e&&e.note)||'';
+  // ★ 修：原来「账户是银行卡 → 直接 return false」会把
+  //   "银行短信里写的充值"排除掉（如「尾号2374卡充值话费100元」），
+  //   导致 充100/扣96 配不上对 → 记成 196。
+  //   正确判据应看【文本说的是不是"充值/缴费"这件事】，而不是账户叫什么都不看。
+  //   只有"这明显是银行扣款流水"时才不算面额。
+  const isRechargeWord=/充值|缴费|话费|电费|水费|燃气费|充话费/.test(note);
+  if(!isRechargeWord) return false;
+  // ★ 关键：必须与 isBankItem 互斥。
+  //   若本条已被判定为"银行扣款实付"（含扣款/消费/支出，且不含成功充值），就不是面额侧。
+  if(/扣款|消费|支出|付款/.test(note) && !/成功充值|已充值|充值成功|缴费成功|已缴费/.test(note)) return false;
+  if(/银行卡|储蓄卡|信用卡|借记卡/.test(acc)) {
+    // 银行渠道发的"成功充值"通知 → 仍是面额侧
+    return true;
+  }
+  return true;
+}
+function isBankItem(e){
+  const acc=(e&&e.account)||'';
+  const note=(e&&e.note)||'';
+  // ★ 第一个判据：先排除"面额侧"（充值/缴费通知），保证与 isRechargeItem 互斥。
+  //   否则「尾号2374卡充值话费100元」会被同时判成 bank 和 recharge → 配不成"一面一实付"。
+  if(/充值|缴费|话费|电费|水费|燃气费|充话费/.test(note)
+     && !/扣款|消费|支出|付款/.test(note)) return false;
+  if(/银行卡|储蓄卡|信用卡|借记卡/.test(acc)) return true;
+  // ★ 银行短信常常不写"银行"二字，只写「尾号2374卡消费96.00元」——
+  //   靠关键词"银行"会漏判，导致 充100/扣96 无法配对 → 重复记账。
+  if(/尾号\s?\d{3,6}/.test(note)) return true;      // 尾号2374卡
+  if(/卡号\s?\d/.test(note)) return true;           // 卡号****1234
+  if(/人民币/.test(note)) return true;              // 银行特有措辞
+  if(/(储蓄|信用|借记)卡/.test(note)) return true;
+  // ★ 修：银行短信也可能写得很"素"，没有尾号/卡号/银行名：
+  //   如「您9月19日支出96.00元」「您账户于14:30网上支付35.50」。
+  //   这类只靠"银行专有词"识别不出来 → 与充值短信配不上对 → 196。
+  //   改为：出现"实付类动词 + 金额"，且不含充值/缴费意图 → 视为银行（实付）侧。
+  if(/扣款|支出|消费|支付|付款|取现|转出|代扣/.test(note)) return true;
+  return false;
+}
+function mergePool(pool){
+  // 排序：已记账优先（避免重复入账），其次银行实付优先（金额更准——合并时保留的是先入 out 的那条），
+  //       再按时间倒序。注意：配对判据已做成【对称】的（见下），不再依赖排序碰运气。
+  pool.sort((a,b)=>{
+    const r=(b._recorded?1:0)-(a._recorded?1:0); if(r) return r;
+    const bk=(isBankItem(b)?1:0)-(isBankItem(a)?1:0); if(bk) return bk;
+    return (b._smsDate||b._time||0)-(a._smsDate||a._time||0);
+  });
+  const out=[], seenK=new Set();
+  const WINDOW=10*60*1000;
+  for(const e of pool){
+    const k=entryKey(e)||e.finger;
+    if(k&&seenK.has(k)) continue;                 // ① 同 key
+    if(e._manual){ if(k)seenK.add(k); out.push(e); continue; }
+    const t=e._smsDate||e._time||0;
+    const amt=Number(e.amount);
+    let dup=false;
+    for(const o of out){
+      if(o._manual) continue;
+      if((o.type||'expense')!==(e.type||'expense')) continue;
+      const ot=o._smsDate||o._time||0;
+      if(t&&ot&&Math.abs(ot-t)>WINDOW) continue;
+      const oamt=Number(o.amount);
+      if(Math.abs(oamt-amt)<0.005){ dup=true; break; }            // ② 金额相同
+      // ③ ★面额 vs 实付 —— 必须【对称判断】：
+      //    原来写成两条方向各判一次，只要任一侧的 isBankItem/isRechargeItem 判错，
+      //    配对就失败 → 记成 196（用户亲历的 bug）。而且原来只有"银行在前"才碰巧合并，
+      //    本质是靠上面的 sort 兜底，不是判据本身成立。
+      //    现在改为：无论谁先谁后，只要【一个是面额侧、一个是实付侧】且实付在面额 50%~100% 之间 → 同一笔。
+      const eR=X_isRecharge(e), eB=X_isBank(e);
+      const oR=X_isRecharge(o), oB=X_isBank(o);
+      const eFace=(eR&&!eB), eReal=(eB&&!eR);
+      const oFace=(oR&&!oB), oReal=(oB&&!oR);
+      if(eFace&&oReal && amt>=oamt && oamt>=amt*0.5){ dup=true; break; }   // 本=面额, 已在=实付
+      if(eReal&&oFace && oamt>=amt && amt>=oamt*0.5){ dup=true; break; }   // 本=实付, 已在=面额
+    }
+    if(dup) continue;
+    if(k) seenK.add(k);
+    out.push(e);
+  }
+  return out;
+}
+// 内部别名，便于配对处写得短（真正的实现在上面）
+function X_isRecharge(e){ return isRechargeItem(e); }
+function X_isBank(e){ return isBankItem(e); }
 async function doImportScan(){
   const st=document.getElementById('importNotifyStatus');
   st.style.display='block'; st.textContent='扫描中...';
@@ -1578,7 +1920,7 @@ async function doImportScan(){
       }
       parsed.forEach(p=>{
         const e=Object.assign({},p,{_rawId:n.id,_rawNkey:n.nkey,_src:'notice',_time:n.time,_boxKey:key});
-        e._recorded=!!(e.finger && txFingerExists(e.finger, e._time));   // 已记账标记（配对去重要用）
+        e._recorded=isAlreadyBooked(e);   // 已记账标记（含面额/实付跨来源判断）
         pool.push(e);
       });
     }
@@ -1608,28 +1950,14 @@ async function doImportScan(){
         }
         parsed.forEach(p=>{
           const e=Object.assign({},p,{_rawId:'',_rawNkey:key,_src:'sms',_smsAddress:s.address,_smsDate:s.date,_boxKey:key});
-          e._recorded=!!(e.finger && txFingerExists(e.finger, e._smsDate));
+          e._recorded=isAlreadyBooked(e);
           pool.push(e);
         });
       }
     }
 
-    // ── ③ 配对去重 ──
-    //   同一笔交易的「短信 + 通知」双来源：金额/同一天/同类型 且 时间差 ≤10 分钟 → 合并成一条
-    //   （银行短信与银行App推送常是同一笔；不去重框里就会出现两条一模一样的）
-    //   已记账的优先当代表 → 整对一起消失
-    pool.sort((a,b)=>(b._recorded?1:0)-(a._recorded?1:0));
-    const seenK=new Set(), seenPay={};
-    const merged=pool.filter(e=>{
-      const k=entryKey(e)||e.finger; if(!k||seenK.has(k)) return false;
-      if(e._manual){ seenK.add(k); return true; }   // 手填项金额未知，不参与配对去重
-      const t=e._smsDate||e._time||0;
-      const day=t?new Date(t).toISOString().slice(0,10):'?';
-      const pk=day+'|'+(e.type||'expense')+'|'+Number(e.amount).toFixed(2);
-      const prev=seenPay[pk];
-      if(prev && Math.abs((prev._smsDate||prev._time||0)-t)<=10*60*1000) return false;
-      seenK.add(k); seenPay[pk]=e; return true;
-    });
+    // ── ③ 智能配对去重（见 mergePool：含「面额 vs 实付」合并，防充100+扣96=196）──
+    const merged=mergePool(pool);
     const nMerge=pool.length-merged.length;
 
     // ── ④ 源清理：通知里已无待入账条目的 → 从原生队列删除 ──
@@ -1662,7 +1990,8 @@ async function doImportScan(){
     window.__impDiag='本轮：通知 '+nNotif+' 条 / 短信 '+nSms+' 条 → 待入账 '+impTx.length+' 条'
       +'（自动剔除：非支付 '+nDrop+' 条，已记账 '+nDup+' 条，合并重复 '+nMerge+' 条）';
     if(!impTx.length){
-      if(loadDismissed().length){ renderImpList(); return; }
+      // 有已清除留存 / 有自动入账记录 → 正常渲染，而不是显示"未发现支付信息"
+      if(loadDismissed().length || loadAutoLog().length){ renderImpList(); return; }
       if(window.MinisBridge && typeof window.MinisBridge.hasNotifAccess==='function'){
         let ok=true; try{ ok=window.MinisBridge.hasNotifAccess(); }catch(e){}
         if(!ok){
@@ -1675,11 +2004,15 @@ async function doImportScan(){
       st.style.display='block';
       let why='';
       try{
+        const ev=readEvidence();
+        let granted=null;
         if(window.MinisBridge && typeof window.MinisBridge.notifStatus==='function'){
-          const o=JSON.parse(window.MinisBridge.notifStatus()||'{}');
-          if(!o.granted) why='\n⚠ 通知使用权未开启 → 支付通知收不到（5G消息类银行通知也不在短信库里）。';
-          else if(!o.connected) why='\n⚠ 通知服务未连接 → 新通知进不来。点上面「重连通知服务」。';
+          granted=JSON.parse(window.MinisBridge.notifStatus()||'{}').granted;
         }
+        if(granted===false) why='\n⚠ 通知使用权未开 → 支付通知收不到（5G消息类银行通知也不在短信库里）。';
+        else if(Number(ev.connectCount||0)===0) why='\n⚠ 系统从未绑定过通知服务（权限虽已开却没连上）→ 打开「通知设置」，把「记账」的开关【关掉再打开】，回来点「重连通知服务」。';
+        else if(ev.lastScanNull==='1') why='\n⚠ 服务未被系统绑定（扫描通知栏返回空）→ 点上面「重连通知服务」。';
+        else if(!ev.lastNotifTs) why='\n⚠ 服务已连上但从未收到通知。若确实有支付通知，请在系统设置给「记账」开「后台高耗电/自启动」。';
       }catch(e){}
       st.textContent=window.__impDiag+why+'\n没有可入账的支付信息。保留支付通知/短信后重新扫描。';
       document.getElementById('importNotifyList').innerHTML='';
@@ -1703,12 +2036,6 @@ async function delImpItemConfirm(i,t){
   // ① 从源里真正删除：通知 → ack 原生队列；短信/通用 → 持久标记「已处理」
   if(t._src==='notice'&&t._rawId) ackPending([t._rawId]);
   if(key) markHandled([key]);
-  // ② 兼容旧忽略集(老版本遗留)
-  try{
-    const skip=JSON.parse(localStorage.getItem(IMP_SKIP_KEY)||'[]');
-    if(t._rawNkey && skip.indexOf(t._rawNkey)<0) skip.push(t._rawNkey);
-    localStorage.setItem(IMP_SKIP_KEY,JSON.stringify(skip));
-  }catch(e){}
   // ③ 移到「已清除」区，灰显留存 7 天，可恢复（同 key 不重复堆积）
   addDismissed(t);
   impTx.splice(i,1);
@@ -1757,6 +2084,69 @@ function doImportConfirm(){
   doImportScan(); // 刷新，已入账的立即消失
 }
 
+// ── 余额对账 ──────────────────────────────────────────
+// 用途：漏记会让账面余额和真实余额对不上。填一次真实余额，系统直接算出差额。
+// 差额 = 真实 - 账面。若差 -20，说明有 20 元支出漏记了。
+function reconDerived(){
+  const bal={};
+  atx().forEach(t=>{
+    if(t.type==='transfer'){
+      bal[t.from]=(bal[t.from]||0)-t.amount;
+      bal[t.to]=(bal[t.to]||0)+t.amount;
+      if(t.fee){ if(t.feePayer==='to') bal[t.to]=(bal[t.to]||0)-t.fee; else bal[t.from]=(bal[t.from]||0)-t.fee; }
+    } else if(t.account){
+      bal[t.account]=(bal[t.account]||0)+(t.type==='income'?t.amount:-t.amount);
+    }
+  });
+  return bal;
+}
+function openRecon(){
+  const accts=ga()||[];
+  const invs=(gi()||[]).filter(x=>x.ours!==false);
+  const der=reconDerived();
+  let html='';
+  if(!accts.length && !invs.length){
+    html='<div style="color:var(--text2);font-size:13px;padding:12px 0">还没有账户。先在「账户」里添加。</div>';
+  }
+  accts.forEach(a=>{
+    const d=Number(der[a]||0);
+    html+=`<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="flex:1;font-size:14px">${a}</span>
+        <span style="font-size:12px;color:var(--text2)">账面 ¥${d.toFixed(2)}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+        <span style="font-size:12px;color:var(--text2);flex:0 0 auto">真实余额</span>
+        <input type="number" step="0.01" inputmode="decimal" data-recon="${a}" data-book="${d}"
+          oninput="reconShow(this)" placeholder="填真实余额"
+          style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);font-size:14px">
+        <span class="recon-diff" data-for="${a}" style="font-size:12px;flex:0 0 auto;min-width:70px;text-align:right"></span>
+      </div>
+    </div>`;
+  });
+  invs.forEach(x=>{
+    html+=`<div style="padding:8px 0;border-bottom:1px solid var(--border);opacity:.85">
+      <span style="font-size:14px">${x.name}</span>
+      <span style="font-size:12px;color:var(--text2)"> （理财账户）当前 ¥${(Number(x.amount)||0).toFixed(2)}</span>
+    </div>`;
+  });
+  document.getElementById('reconList').innerHTML=html;
+  document.getElementById('reconModal').classList.add('show');
+}
+function reconShow(inp){
+  const name=inp.getAttribute('data-recon');
+  const book=Number(inp.getAttribute('data-book'))||0;
+  const el=document.querySelector('.recon-diff[data-for="'+name+'"]');
+  if(!el) return;
+  const v=inp.value.trim();
+  if(v===''){ el.textContent=''; return; }
+  const real=parseFloat(v);
+  if(isNaN(real)){ el.textContent=''; return; }
+  const diff=Math.round((real-book)*100)/100;
+  if(Math.abs(diff)<0.005){ el.style.color='var(--green)'; el.textContent='✅ 对平'; }
+  else if(diff<0){ el.style.color='#e55'; el.textContent='差 '+diff.toFixed(2)+'（漏记）'; }
+  else { el.style.color='var(--gold)'; el.textContent='多 '+diff.toFixed(2); }
+}
 // ── 自动记账模块 ──
 const AUTO_THRESHOLD = 30;          // ¥30 以下自动入账
 const DEDUP_WINDOW = 5*60*1000;     // 5分钟内同指纹视为同一条（防重叠重复）
@@ -1779,13 +2169,22 @@ function looksLikePaymentText(s){
   // ① 排除非交易短信
   if(/验证码|校验码|动态码|登录码|激活码|取件码|签收码|提货码/.test(s)) return false;
   if(/退订|回T退|回复TD|点击链接|点击下载|立即领取|优惠券|促销|抽奖|限时|特惠|办卡|贷款|理财推荐|保险推荐/.test(s)) return false;
+  // ★ 额度/授信类通知不是消费：它们只"告知"额度，不是钱动了。
+  //   例「您的花呗额度已提升至5000元」「信用卡可用额度50000元」——
+  //   payWord 会命中"花呗/信用卡"，金额也能解析出来 → 会被当成 5000 元支出记进账（假账）。
+  //   判据：出现【提额/额度/可用额度/授信】且没有【已支付/已扣款/已消费】等"钱真动了"的完成语。
+  if(/提额|额度|可用额度|授信|限额|分期额度|临时额度/.test(s)
+     && !/已支付|已扣款|已消费|支付成功|扣款成功|消费成功|已支出|已还款|还款成功|已到账|已收款/.test(s)) return false;
   if(/快递|包裹|已签收|派送|物流|外卖已送达|订单已/.test(s) && !/[¥￥]\s?\d/.test(s)) return false;
   const done=/已支付|已扣款|已消费|支付成功|扣款成功|交易成功|消费成功|已支出|入账成功|已到账|已收款|已退回|已退款|支出成功|已完成|已缴费|已充值|已转入|已转出/;
   if(/余额不足|欠费|请及时|温馨提醒|温馨提示|应缴|应还|现提醒|不足/.test(s) && !done.test(s)) return false;
   // ② 必须有金额
-  if(!/([¥￥]\s?\d)|(\d[\d,]*(\.\d{1,2})?\s?元)/.test(s)) return false;
+  // ★ 直接复用解析用的 findAmounts，不再自己维护一套金额正则。
+  //   以前两套规则不一致：判定说"非支付"，解析却能算出金额 →
+  //   像「网上支付人民币-35.50」这种真实银行通知被判成非支付【直接丢掉】。
+  if(!findAmounts(s).length) return false;
   // ③ 必须有支付动作词或账户词
-  const payWord=/支付|消费|支出|收入|到账|扣款|退款|退回|转账|收款|入账|交易|付款|还款|存入|转入|转出|缴费|充值|银行卡|储蓄卡|信用卡|借记卡|花呗|借呗|白条|尾号|卡号|实付|余额/;
+  const payWord=/支付|消费|支出|收入|到账|扣款|退款|退回|转账|收款|入账|交易|付款|还款|存入|转入|转出|缴费|充值|银行卡|储蓄卡|信用卡|借记卡|花呗|借呗|白条|尾号|卡号|实付|余额|人民币/;
   return payWord.test(s);
 }
 function parseNotifFull(n){
@@ -1865,7 +2264,7 @@ function singleParse(seg,parentAcc){
   let account='';
   if(/支付宝/.test(s)) account='支付宝';
   else if(/微信|财付通/.test(s)) account='微信';
-  else if(/银行卡|银行|招商|工商|建设|农业|中国银行/.test(s)) account='银行卡';
+  else if(/银行卡|银行|招商|工商|建设|农业|中国银行|尾号\s?\d{3,6}|卡号\s?\d/.test(s)) account='银行卡';
   if(!account) account=parentAcc||'';
   if(!isPaymentSegment(s)) return null;
   return {amount:amt,type:type,category:category,account:account,
@@ -1926,6 +2325,41 @@ function ackPending(ids){
 // 匹配规则：
 //   ref:xxx  → 流水号/单号精确匹配（最可靠）
 //   amt:账户:金额:窗口 → 账户+金额相同，且时间在 ±5 分钟内（不用"桶相等"，避免跨 5 分钟边界的漏判）
+// 这笔是否已经入账（比 txFingerExists 更全面）：
+//  ① 指纹完全相同（同一条通知/短信）
+//  ② 金额+账户相同且时间相近（同一天的同一笔，不同来源）
+//  ③ ★面额 vs 实付：本条是"充值100"，账本里已有"银行扣96"（或反过来）→ 认定同一笔，避免重复记账
+//     （只比指纹会漏掉：银行通知先自动记了96，之后充值短信又冒出100 → 记成196）
+function isAlreadyBooked(e){
+  if(!e) return false;
+  if(e.finger && txFingerExists(e.finger, e._smsDate||e._time)) return true;
+  const amt=Number(e.amount);
+  if(!(amt>0)) return false;
+  const t=Number(e._smsDate||e._time||0);
+  const all=atx();
+  // ★ 修：原来「时间不可比 → 放宽为 true」会让【任何同额的历史记录】都被当成已入账，
+  //   从而静默吞掉一笔真实的新消费。改为：时间缺失时不"放宽"，只保留同额判定
+  //   （同额本身已是较强信号，但不该由"缺时间"额外放大）。
+  const near=rt=>{
+    if(!t||!rt) return false;                      // 时间不可比 → 不认定"相近"，避免误吞
+    if(Math.abs(rt-t)<=10*60*1000) return true;
+    try{ return new Date(rt).toISOString().slice(0,10)===new Date(t).toISOString().slice(0,10); }catch(x){ return false; }
+  };
+  for(let i=0;i<all.length;i++){
+    const r=all[i];
+    if((r.type||'expense')!==(e.type||'expense')) continue;
+    const rt=new Date(r.time).getTime();
+    const ramt=Number(r.amount);
+    if(Math.abs(ramt-amt)<0.005 && near(rt)) return true;                       // ② 同额同源
+    // ③ ★面额 vs 实付（与 mergePool 保持同一套【对称且互斥】的判据，
+    //    避免两边规则不一致导致"框里去重了、入账时又重记"）
+    const eR=isRechargeItem(e), eB=isBankItem(e);
+    const rR=isRechargeItem(r), rB=isBankItem(r);
+    if(eR&&!eB && rB&&!rR && ramt<=amt && ramt>=amt*0.5 && near(rt)) return true;   // 本=面额, 账本=实付
+    if(eB&&!eR && rR&&!rB && amt<=ramt && amt>=ramt*0.5 && near(rt)) return true;   // 本=实付, 账本=面额
+  }
+  return false;
+}
 function txFingerExists(finger, when){
   if(!finger) return false;
   const all=atx();
@@ -1971,7 +2405,7 @@ async function autoBookkeep(){
   try{
   const q=await readPendingQueue();
   const tx=atx();
-  let autoN=0, confirmItems=[], autoAck=[];
+  let autoN=0, confirmItems=[], autoAck=[], autoLog=[];
   const seen=new Set();
   for(const n of q){
     const nid=n.id||('q_'+Date.now()+'_'+Math.random().toString(36).slice(2,6));
@@ -1979,10 +2413,14 @@ async function autoBookkeep(){
     if(!es.length){ autoAck.push(nid); continue; }  // 非支付通知
     let anyAuto=false, anyConfirm=false;
     for(const e of es){
-      if(seen.has(e.finger)||txFingerExists(e.finger, e._smsDate||e._time)){ anyAuto=true; continue; }
+      if(seen.has(e.finger)||isAlreadyBooked(e)){ anyAuto=true; continue; }
       seen.add(e.finger);
       if(!e.needConfirm){
-        tx.push(makeTx(e)); autoN++; anyAuto=true;
+        tx.push(makeTx(e,{auto:true})); autoN++; anyAuto=true;   // 打「自动」标记，便于在流水里辨认
+        // 【关键】自动入账也必须留痕：否则用户打开框是空的，
+        // 会误以为"根本没识别到"，而其实早就记进去了。
+        autoLog.push({ts:Date.now(), amount:e.amount, type:e.type,
+                      note:e.note||'', account:e.account||'', category:e.category||'其他'});
       } else {
         confirmItems.push({pid:nid, entry:e}); anyConfirm=true;
       }
@@ -1993,16 +2431,38 @@ async function autoBookkeep(){
     else if(!anyAuto && !anyConfirm && es.length) autoAck.push(nid);
   }
   stx(tx);
-  if(autoN>0){ ra(); pendingAutoCount+=autoN; }
+  if(autoN>0){ ra(); pendingAutoCount+=autoN; appendAutoLog(autoLog); }
   if(confirmItems.length){
     autoQueue=confirmItems; autoIdx=0;
     setTimeout(()=>showAutoConfirm(),150);
   } else if(pendingAutoCount>0){
-    setTimeout(()=>{ts('自动记账 '+pendingAutoCount+' 条（¥'+AUTO_THRESHOLD+' 以内）');pendingAutoCount=0;},400);
+    setTimeout(()=>{
+      const last=autoLog[autoLog.length-1];
+      ts('已自动记 ¥'+(last?Number(last.amount).toFixed(2):'')+(last&&last.category?(' · '+last.category):'')
+         +(pendingAutoCount>1?('（共 '+pendingAutoCount+' 笔）'):'')+' → 见「流水」页');
+      pendingAutoCount=0;
+    },400);
   }
   ackPending(autoAck);
   } finally { autoRunning=false; }
 }
+
+// ── 自动入账日志：让"已经自动记好的账"必须露面 ──
+// 背景：小额支付(≤AUTO_THRESHOLD且账户匹配)会自动入账、不进待处理框。
+// 用户只看框 → 以为"没识别到"，其实早记进去了。这里保留最近 50 条供查看。
+const AUTO_LOG_KEY='auto_log';
+function loadAutoLog(){
+  let arr=stateRead(AUTO_LOG_KEY); if(!Array.isArray(arr)) arr=[];
+  return arr;
+}
+function appendAutoLog(items){
+  if(!items||!items.length) return;
+  let arr=loadAutoLog();
+  arr=arr.concat(items);
+  if(arr.length>50) arr=arr.slice(arr.length-50);
+  stateWrite(AUTO_LOG_KEY,arr);
+}
+function clearAutoLog(){ stateWrite(AUTO_LOG_KEY,[]); }
 
 function openAutoModal(){document.getElementById('autoConfirmModal').classList.add('show')}
 function closeAutoModal(){document.getElementById('autoConfirmModal').classList.remove('show')}
@@ -2079,16 +2539,38 @@ ra();
   })();
   // 2) 页面可见时每 5 秒轮询处理新通知（fingerprint 判重 + autoRunning 锁防重复）
   let pollTimer=null;
-  function startPoll(){ if(pollTimer) return; pollTimer=setInterval(()=>{ if(document.visibilityState==='visible') autoBookkeep(); },5000); }
+  function startPoll(){ if(pollTimer) return; pollTimer=setInterval(()=>{
+    if(document.visibilityState!=='visible') return;
+    autoBookkeep();
+    // 每 30 秒主动抓一次通知栏：服务被系统冻结时，靠这个补漏
+    // （被动接收失效的机型，只要打开着 app 就还能抓到当前通知）
+    __scanTick++;
+    if(__scanTick%6===0 && window.MinisBridge && typeof window.MinisBridge.triggerScan==='function'){
+      try{ window.MinisBridge.triggerScan(); }catch(e){}
+    }
+  },5000); }
+  let __scanTick=0;
   function stopPoll(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
   if(document.visibilityState==='visible') startPoll();
   // 3) visibilitychange / focus 事件：切回前台立即处理 + 检查通知服务是否掉线
+  let __lastRebind=0;
   function ensureNotifAlive(){
     try{
-      if(!window.MinisBridge || typeof window.MinisBridge.notifStatus!=='function') return;
-      const o=JSON.parse(window.MinisBridge.notifStatus()||'{}');
-      // 已授权但服务未连接 → 主动请求重连（国产ROM会静默解绑，这是"用一次就失灵"的根因）
-      if(o.granted && !o.connected && typeof window.MinisBridge.requestRebind==='function'){
+      if(!window.MinisBridge) return;
+      // 用【证据】判断，不再用进程重启就误报的静态标志：
+      //   - 明确未被绑定(lastScanNull=1)，或
+      //   - 解绑次数 > 连接次数（说明解绑后没连回来）
+      const ev=readEvidence();
+      let granted=false;
+      if(typeof window.MinisBridge.notifStatus==='function'){
+        granted=!!JSON.parse(window.MinisBridge.notifStatus()||'{}').granted;
+      }
+      const unbound = (ev.lastScanNull==='1');
+      const dangling = Number(ev.disconnectCount||0) > Number(ev.connectCount||0);
+      const now=Date.now();
+      if(granted && (unbound||dangling) && (now-__lastRebind>30000)
+         && typeof window.MinisBridge.requestRebind==='function'){
+        __lastRebind=now;
         window.MinisBridge.requestRebind();
       }
     }catch(e){}
