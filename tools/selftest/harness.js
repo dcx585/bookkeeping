@@ -69,6 +69,7 @@ vm.createContext(sandbox);
 
 // 顶层 const/let 不会挂到 sandbox，用包一层返回的方式导出
 const exportList=[
+ 'safeRead','safeWrite','snapshotBeforeWrite','listSnapshots','migrateTx','SCHEMA_VERSION','SNAP_PREFIX','restoreSnapshot',
  'parseNotifFull','findAmounts','isPaymentSegment','singleParse','looksLikePaymentText',
  'mergePool','isRechargeItem','isBankItem','isAlreadyBooked','getCashBalances','reconDerived',
  'entryKey','dismissKey','makeTx','uid','atx','ga','gi','updateInvPlanHint','stx'

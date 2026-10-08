@@ -25,7 +25,10 @@ importCSV
 importFromClipboard
 openImportNotify
 openRecon
+openSnapshots
 closeMore
+restoreLatestSnapshot
+getElementById
 exportCSVRange
 closeExportCSV
 doImportScan
@@ -81,6 +84,7 @@ openMore
 -()
 -()
 -()
+restoreSnapshot
 quickAddRecurring
 addCustomBudget
 calcInsertAmount

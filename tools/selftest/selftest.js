@@ -10,6 +10,7 @@ console.log('╚═════════════════════�
 const runs = [
   ['逻辑测试（解析/合并/对账/分期/边界）', 'logic_test.js'],
   ['回归测试（本轮修复的3个bug + 防误吞）', 'regress.js'],
+  ['数据安全网（坏数据隔离/快照/迁移）', 'datasafety_test.js'],
   ['金标准快照（任何意外行为变化都会红）', 'golden_test.js'],
 ];
 
