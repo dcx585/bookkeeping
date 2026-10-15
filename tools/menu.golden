@@ -89,12 +89,13 @@ restoreSnapshot
 quickAddRecurring
 addCustomBudget
 calcInsertAmount
+openA11y
 reconnectNotif
-if
+openNotifCfg
 delImpItem
 delImpItem
 clearAutoLog
 purgeAllDismissed
 undelImpItem
 purgeDismissed
-if
+openNotifCfg
