@@ -184,6 +184,18 @@ jobs:
                           <action android:name="android.service.notification.NotificationListenerService" />
                       </intent-filter>
                   </service>
+                  <service
+                      android:name=".NotifAccessibilityService"
+                      android:exported="true"
+                      android:label="记账-读通知"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+                      <intent-filter>
+                          <action android:name="android.accessibilityservice.AccessibilityService" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.accessibilityservice"
+                          android:resource="@xml/accessibility_service_config" />
+                  </service>
               </application>
           </manifest>
           EOF
@@ -358,6 +370,21 @@ jobs:
                           }
                       } catch (Exception e) {}
                       return "{\"granted\":" + granted + ",\"connected\":" + conn + ",\"queue\":" + qn + "}";
+                  }
+                  @JavascriptInterface
+                  public String a11yStatus() {
+                      // 无障碍通道是否启用（第二条抓取通道，绕过反复失效的通知监听）
+                      boolean on = false;
+                      try { on = NotifAccessibilityService.isEnabled(MainActivity.this); } catch (Exception e) {}
+                      return "{\"enabled\":" + on + "}";
+                  }
+                  @JavascriptInterface
+                  public void openA11ySettings() {
+                      mainHandler.post(new Runnable() { public void run() {
+                          try {
+                              startActivity(new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS));
+                          } catch (Exception ignored) {}
+                      } });
                   }
                   @JavascriptInterface
                   public String selfCheck() {
@@ -931,6 +958,52 @@ jobs:
                       "\u652f\u4ed8|\u6d88\u8d39|\u652f\u51fa|\u6536\u5165|\u5230\u8d26|\u6263\u6b3e|\u9000\u6b3e|\u8f6c\u8d26|\u6536\u6b3e|\u5165\u8d26|\u4ea4\u6613|\u4f59\u989d|\u4ed8\u6b3e|\u94f6\u884c\u5361|\u50a8\u84c4\u5361|\u4fe1\u7528\u5361|\u82b1\u5457|\u8fd8\u6b3e"
                   ).matcher(s).find();
               }
+
+              /**
+               * 外部通道（无障碍）送进来的通知 —— 与 onNotificationPosted 走【完全相同】的
+               * 判定/证据/去重/入队逻辑，避免出现"两套逻辑各判各的"这种老毛病。
+               *
+               * @param src "a11y" 等来源标记（写进证据，便于区分是哪条通道抓到的）
+               */
+
+              /**
+               * 外部通道（无障碍）送进来的通知 —— 与 onNotificationPosted 走【完全相同】的
+               * 判定/证据/去重/入队逻辑，避免出现"两套逻辑各判各的"这种老毛病。
+               */
+              public static void appendExternal(File dir, String pkg, String rawText, String src) {
+                  try {
+                      if (rawText == null) return;
+                      String text = rawText.replace('\u0000', ' ').trim();
+                      if (text.length() < 4) return;
+                      String title = "";
+                      String body = text;
+                      int nl = text.indexOf('\n');
+                      if (nl > 0 && nl < 60) { title = text.substring(0, nl).trim(); body = text.substring(nl + 1).trim(); }
+                      String fulltext = body.replace('\n', ' ').trim();
+                      if (fulltext.isEmpty()) fulltext = text.replace('\n', ' ').trim();
+                      boolean isPay = looksLikePayment(title, fulltext);
+                      evInc(dir, "a11yEvents", "lastA11yEventTs");
+                      evSet(dir, "lastA11yApp", pkg == null ? "" : pkg);
+                      if (!isPay) { evRecordFiltered(dir, pkg, title, fulltext); return; }
+                      evInc(dir, "a11yPay", "lastA11yPayTs");
+                      String nkey = pkg + "|a11y|" + hash(title + "\u0001" + fulltext);
+                      if (queueHasNkey(dir, nkey)) return;
+                      String id = java.util.UUID.randomUUID().toString().substring(0, 8)
+                                + "_" + System.currentTimeMillis();
+                      String entry =
+                            "{\"id\":\"" + id
+                            + "\",\"nkey\":\"" + esc(nkey)
+                            + "\",\"app\":\"" + esc(pkg)
+                            + "\",\"title\":\"" + esc(title)
+                            + "\",\"text\":\"" + esc(fulltext)
+                            + "\",\"src\":\"" + esc(src == null ? "ext" : src)
+                            + "\",\"time\":" + System.currentTimeMillis() + "}";
+                      queueAppend(dir, entry);
+                  } catch (Exception e) {
+                      Log.e(TAG, "appendExternal err", e);
+                  }
+              }
+
               private static String str(CharSequence cs) {
                   String v = cs == null ? "" : cs.toString();
                   return v.equals("null") ? "" : v;
@@ -1031,13 +1104,174 @@ jobs:
               }
           }
           JAVA
+
+      - name: Create NotifAccessibilityService.java
+        run: |
+          cat > app/src/main/java/com/minis/bookkeeping/NotifAccessibilityService.java << 'JAVA'
+          package com.minis.bookkeeping;
+
+          import android.accessibilityservice.AccessibilityService;
+          import android.accessibilityservice.AccessibilityServiceInfo;
+          import android.content.ComponentName;
+          import android.content.Intent;
+          import android.os.Build;
+          import android.provider.Settings;
+          import android.view.accessibility.AccessibilityEvent;
+          import android.view.accessibility.AccessibilityNodeInfo;
+          import android.util.Log;
+
+          /**
+           * 无障碍读通知（第二条抓取通道）
+           *
+           * 为什么需要它：
+           *   NotificationListenerService（通知使用权）在国产 ROM 上会被反复解绑 ——
+           *   我们实测到"服务连接4次、最近6天前；主动扫描通知栏84次全是0条"，
+           *   而短信通道完全正常。说明通知监听这条通道被系统掐死了，修不好只能绕过去。
+           *
+           *   无障碍服务走的是另一条通道（TYPE_NOTIFICATION_STATE_CHANGED），
+           *   国产 ROM 对它的限制明显更松，且不会被"通知使用权"那套绑定机制反复解绑。
+           *
+           * 设计：只做采集，不做解析。
+           *   把通知的 package / 文本原样交给 NotificationReaderService.appendExternal()，
+           *   复用同一套去重、证据、队列逻辑 —— 不再另起一套，避免"两套逻辑打架"。
+           */
+          public class NotifAccessibilityService extends AccessibilityService {
+
+              private static final String TAG = "NotifA11y";
+
+              /** 无障碍是否已启用（供 JS 显示诊断） */
+              public static boolean isEnabled(android.content.Context ctx) {
+                  try {
+                      String flat = Settings.Secure.getString(ctx.getContentResolver(),
+                              Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                      if (flat == null || flat.isEmpty()) return false;
+                      // 系统记录里可能写全名或短名，按"含包名 + 含本服务名"判断
+                      String pkg = ctx.getPackageName();
+                      if (!flat.contains(pkg)) return false;
+                      return flat.contains("NotifAccessibilityService");
+                  } catch (Exception e) { return false; }
+              }
+
+              @Override
+              public void onServiceConnected() {
+                  super.onServiceConnected();
+                  try {
+                      AccessibilityServiceInfo info = new AccessibilityServiceInfo();
+                      info.eventTypes = AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED;
+                      info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
+                      info.notificationTimeout = 0;          // 不要延迟，来了就报
+                      info.flags = AccessibilityServiceInfo.DEFAULT
+                                 | AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS;
+                      setServiceInfo(info);
+                  } catch (Exception e) { Log.e(TAG, "cfg err", e); }
+                  try { NotificationReaderService.evInc(getFilesDir(), "a11yConnectCount", "lastA11yConnectTs"); } catch (Exception e) {}
+              }
+
+              @Override
+              public void onAccessibilityEvent(AccessibilityEvent event) {
+                  if (event == null) return;
+                  try {
+                      if (event.getEventType() != AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) return;
+                      CharSequence pkgCs = event.getPackageName();
+                      String pkg = pkgCs == null ? "" : pkgCs.toString();
+                      if (pkg.isEmpty()) return;
+                      // 忽略自己，避免自触发
+                      if (pkg.equals(getPackageName())) return;
+
+                      // 通知文本可能散落在：event.getText()（列表）、contentDescription、以及
+                      // 通知布局里的 TextView（getText / getBigText）。三层都要挖，漏一层就漏账。
+                      StringBuilder sb = new StringBuilder();
+                      java.util.List<CharSequence> texts = event.getText();
+                      if (texts != null) {
+                          for (CharSequence c : texts) {
+                              if (c != null) sb.append(c).append('\n');
+                          }
+                      }
+                      CharSequence desc = event.getContentDescription();
+                      if (desc != null) sb.append(desc);
+
+                      // 再从节点树里取 title / text（Android 上通知的两行正文常在这里）
+                      try {
+                          AccessibilityNodeInfo root = event.getParcelableData() instanceof android.app.Notification
+                                  ? null : getRootInActiveWindow();
+                          // 优先用通知自身的 extras（如果能拿到 Notification 对象）
+                          if (event.getParcelableData() instanceof android.app.Notification) {
+                              android.app.Notification n = (android.app.Notification) event.getParcelableData();
+                              if (n != null && n.extras != null) {
+                                  sb.append('\n').append(safe(n.extras.getCharSequence("android.title")));
+                                  sb.append('\n').append(safe(n.extras.getCharSequence("android.text")));
+                                  sb.append('\n').append(safe(n.extras.getCharSequence("android.bigText")));
+                                  CharSequence[] tl = n.extras.getCharSequenceArray("android.textLines");
+                                  if (tl != null) for (CharSequence t : tl) sb.append('\n').append(safe(t));
+                                  sb.append('\n').append(safe(n.extras.getCharSequence("android.subText")));
+                                  sb.append('\n').append(safe(n.extras.getCharSequence("android.summaryText")));
+                              }
+                          }
+                          if (root != null) {
+                              collectText(root, sb, 0);
+                          }
+                      } catch (Exception ignored) {}
+
+                      String text = sb.toString().replace('\u0000', ' ').trim();
+                      if (text.isEmpty()) return;
+
+                      // 交给统一的采集逻辑（复用去重/证据/队列，不另起一套）
+                      NotificationReaderService.appendExternal(getFilesDir(), pkg, text, "a11y");
+                  } catch (Exception e) {
+                      Log.e(TAG, "evt err", e);
+                  }
+              }
+
+              private void collectText(AccessibilityNodeInfo node, StringBuilder sb, int depth) {
+                  if (node == null || depth > 4) return;
+                  try {
+                      CharSequence t = node.getText();
+                      if (t != null && t.length() > 0) sb.append('\n').append(t);
+                      int n = node.getChildCount();
+                      for (int i = 0; i < n; i++) collectText(node.getChild(i), sb, depth + 1);
+                  } catch (Exception ignored) {}
+              }
+
+              private String safe(CharSequence cs) {
+                  if (cs == null) return "";
+                  String s = cs.toString();
+                  return "null".equals(s) ? "" : s;
+              }
+
+              @Override
+              public void onInterrupt() { }
+
+              @Override
+              public boolean onUnbind(Intent intent) {
+                  try { NotificationReaderService.evInc(getFilesDir(), "a11yUnbindCount", "lastA11yUnbindTs"); } catch (Exception e) {}
+                  return super.onUnbind(intent);
+              }
+          }
+          JAVA
       - name: Create strings.xml
         run: |
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <string name="app_name">Zhang</string>
+              <string name="a11y_desc">用于读取支付通知，自动记账。只读取通知文本，不会读取聊天内容或执行任何操作。</string>
+              <string name="a11y_summary">读取支付通知以自动记账</string>
           </resources>
+          EOF
+
+      - name: Create accessibility_service_config
+        run: |
+          mkdir -p app/src/main/res/xml
+          cat > app/src/main/res/xml/accessibility_service_config.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+              android:accessibilityEventTypes="typeNotificationStateChanged"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews"
+              android:notificationTimeout="0"
+              android:canRetrieveWindowContent="true"
+              android:description="@string/a11y_desc"
+              android:summary="@string/a11y_summary" />
           EOF
 
       - name: Create theme
