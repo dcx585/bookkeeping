@@ -1712,11 +1712,18 @@ function refreshImpStatus(){
   hint.style.display=need?'block':'none';
   if(need){
     hint.innerHTML=msg+'<div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap">'
-      +(a11yOn===false?'<button onclick="if(window.MinisBridge)window.MinisBridge.openA11ySettings()" style="background:#2a9d5c;border:none;border-radius:6px;color:#fff;font-size:12px;padding:5px 10px">开启无障碍</button>':'')
+      +(a11yOn===false?'<button onclick="openA11y()" style="background:#2a9d5c;border:none;border-radius:6px;color:#fff;font-size:12px;padding:5px 10px">开启无障碍</button>':'')
       +'<button onclick="reconnectNotif()" style="background:#e55;border:none;border-radius:6px;color:#fff;font-size:12px;padding:5px 10px">重连通知服务</button>'
-      +'<button onclick="if(window.MinisBridge)window.MinisBridge.openNotifSettings()" style="background:none;border:1px solid #e55;border-radius:6px;color:#e55;font-size:12px;padding:5px 10px">打开通知设置</button>'
+      +'<button onclick="openNotifCfg()" style="background:none;border:1px solid #e55;border-radius:6px;color:#e55;font-size:12px;padding:5px 10px">打开通知设置</button>'
       +'</div>';
   }
+}
+// 包装成具名函数（内联 onclick 里写 if(...) 会被按钮指纹门禁误判为函数名）
+function openNotifCfg(){
+  try{ if(window.MinisBridge && window.MinisBridge.openNotifSettings) window.MinisBridge.openNotifSettings(); }catch(e){}
+}
+function openA11y(){
+  try{ if(window.MinisBridge && window.MinisBridge.openA11ySettings) window.MinisBridge.openA11ySettings(); }catch(e){}
 }
 function reconnectNotif(){
   if(window.MinisBridge && typeof window.MinisBridge.requestRebind==='function'){
@@ -2274,7 +2281,7 @@ async function doImportScan(){
         if(!ok){
           st.style.display='block';
           st.textContent='未开启「通知使用权」，读不到支付通知（短信仍可读）。';
-          document.getElementById('importNotifyList').innerHTML='<button class="submit" onclick="if(window.MinisBridge)window.MinisBridge.openNotifSettings()">打开设置授权</button>';
+          document.getElementById('importNotifyList').innerHTML='<button class="submit" onclick="openNotifCfg()">打开设置授权</button>';
           return;
         }
       }
