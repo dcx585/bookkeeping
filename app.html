@@ -1626,12 +1626,19 @@ function impStatusText(){
   }catch(e){}
   const ev=readEvidence();
   const seen=(Number(ev.notifPay||0)+Number(ev.notifNonPay||0));
+  let a11yTxt='';
+  try{
+    if(window.MinisBridge && typeof window.MinisBridge.a11yStatus==='function'){
+      a11yTxt='无障碍 '+(JSON.parse(window.MinisBridge.a11yStatus()||'{}').enabled?'已开':'未开')+'（收 '+Number(ev.a11yEvents||0)+'）';
+    }
+  }catch(e){}
   if(ev.lastNotifTs){
     parts.push('收到通知 '+seen+'条(支付类'+Number(ev.notifPay||0)+')·最近'+agoText(ev.lastNotifTs));
   } else {
     parts.push('收到通知 0条');
   }
   parts.push('服务连过 '+Number(ev.connectCount||0)+'次');
+  if(a11yTxt) parts.push(a11yTxt);
   if(ev.lastScanTs) parts.push('扫通知栏 '+Number(ev.lastScanActive||0)+'条');
   parts.push('短信 '+__impRaw.nSms+'条');
   return parts.join(' · ');
@@ -1647,10 +1654,29 @@ function refreshImpStatus(){
       granted=JSON.parse(window.MinisBridge.notifStatus()||'{}').granted;
     }
   }catch(e){}
+  // 无障碍通道（第二条抓取通道）
+  let a11yOn=null;
+  try{
+    if(window.MinisBridge && typeof window.MinisBridge.a11yStatus==='function'){
+      a11yOn=!!JSON.parse(window.MinisBridge.a11yStatus()||'{}').enabled;
+    }
+  }catch(e){}
   const ev=readEvidence();
+  const a11yN=Number(ev.a11yEvents||0), a11yPay=Number(ev.a11yPay||0);
   let need=false, msg='';
   const connCnt=Number(ev.connectCount||0);
-  if(granted===false){
+  // ★ 无障碍通道优先提示：通知监听在你手机上反复失效（实测"连接4次、最近6天前，主动扫描84次全0"），
+  //   无障碍走另一条系统通道，是更可靠的方案。
+  if(a11yOn===false){
+    need=true;
+    msg='【建议开启无障碍】通知监听这条通道在你手机上会反复被系统掐断。\n'
+       +'开启「无障碍」后走另一条通道，能稳定读到微信/银行支付通知：\n'
+       +'点下面「开启无障碍」→ 在列表里找到「记账」→ 打开开关。';
+  } else if(a11yOn===true && a11yN===0){
+    need=true;
+    msg='无障碍已开启，但还没收到过通知。若此刻通知栏有通知，请下拉一下通知栏触发一次；\n'
+       +'仍为 0 则说明两条通道都被系统限制，请给「记账」开「后台高耗电/自启动」。';
+  } else if(granted===false){
     need=true;
     msg='「通知使用权」没开 → 收不到任何支付通知（短信库里没有的5G消息也收不到）。';
   } else if(connCnt===0){
@@ -1686,6 +1712,7 @@ function refreshImpStatus(){
   hint.style.display=need?'block':'none';
   if(need){
     hint.innerHTML=msg+'<div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap">'
+      +(a11yOn===false?'<button onclick="if(window.MinisBridge)window.MinisBridge.openA11ySettings()" style="background:#2a9d5c;border:none;border-radius:6px;color:#fff;font-size:12px;padding:5px 10px">开启无障碍</button>':'')
       +'<button onclick="reconnectNotif()" style="background:#e55;border:none;border-radius:6px;color:#fff;font-size:12px;padding:5px 10px">重连通知服务</button>'
       +'<button onclick="if(window.MinisBridge)window.MinisBridge.openNotifSettings()" style="background:none;border:1px solid #e55;border-radius:6px;color:#e55;font-size:12px;padding:5px 10px">打开通知设置</button>'
       +'</div>';
