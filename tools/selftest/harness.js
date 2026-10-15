@@ -1,9 +1,11 @@
 // 在 node 里跑 app.html 的逻辑，用于静态+逻辑自检
 const fs=require('fs');
 const vm=require('vm');
+const path=require('path');
 
 // ── 1. 抽取 JS ──
-const html=fs.readFileSync('/var/minis/shared/bookkeeping/tools/selftest/../../app.html','utf8');
+// 用相对当前文件(__dirname)定位 app.html，避免 CI 上取不到本地绝对路径
+const html=fs.readFileSync(path.join(__dirname,'..','..','app.html'),'utf8');
 const m=/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/.exec(html);
 let src=m[1];
 
