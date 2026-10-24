@@ -18,6 +18,7 @@ closePicker
 openImportNotify
 openRecon
 openBudgetSettings
+openParserDiag
 backupData
 openCalc
 openBgModal
@@ -99,3 +100,5 @@ purgeAllDismissed
 undelImpItem
 purgeDismissed
 openNotifCfg
+setParseV2
+runParserDiag
