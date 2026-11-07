@@ -233,6 +233,8 @@ input[type=checkbox]{accent-color:var(--accent)}
 
 .picker-trigger{flex:1;padding:14px 16px;border:1px solid var(--border);border-radius:10px;font-size:16px;background:var(--bg);color:var(--text);cursor:pointer;font-family:inherit;text-align:left;transition:border-color .2s}
 .picker-trigger:active{border-color:var(--accent)}
+.picker-trigger.selected{border-color:var(--accent);background:var(--accent);color:#fff}
+.picker-trigger.selected span{color:rgba(255,255,255,.7)!important}
 .picker-row{display:flex;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border);cursor:pointer;font-size:15px;transition:background .15s;gap:4px}
 .picker-row:active{background:var(--bg)}
 .picker-row:last-child{border-bottom:none}
@@ -377,6 +379,21 @@ input[type=checkbox]{accent-color:var(--accent)}
     </div>
     <button class="submit" id="txSubmit" onclick="saveTx()">确认支出</button>
     <button class="cancel-btn" onclick="closeTxModal()">取消</button>
+  </div>
+</div>
+
+<div class="modal" id="repayModal">
+  <div class="sheet">
+    <h3>还款</h3>
+    <div id="repayDebt" style="font-size:13px;color:var(--text2);margin-bottom:10px;line-height:1.6"></div>
+    <input type="number" id="repayAmount" placeholder="还多少" step="0.01" inputmode="decimal">
+    <div class="row" style="margin-top:-4px">
+      <button class="picker-trigger" id="repayAllBtn" onclick="repayAll()" style="flex:0 0 auto">还清全部</button>
+    </div>
+    <div style="font-size:12.5px;color:var(--text2);margin:12px 0 6px">从哪个账户还</div>
+    <div id="repayFrom" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    <button class="submit" id="repaySubmit" onclick="saveRepay()">确认还款</button>
+    <button class="cancel-btn" onclick="closeRepay()">取消</button>
   </div>
 </div>
 
@@ -579,7 +596,7 @@ input[type=checkbox]{accent-color:var(--accent)}
 
 <div class="bottom-bar">
   <button onclick="openSearch()">搜索</button>
-  <button onclick="toggleFS()">全屏</button>
+  <button onclick="openRepay()">还款</button>
   <button onclick="openMore()">更多</button>
 </div>
 
@@ -611,7 +628,7 @@ input[type=checkbox]{accent-color:var(--accent)}
   if(h>=6&&h<12)g='早上好';else if(h>=12&&h<14)g='中午好';else if(h>=14&&h<18)g='下午好';else if(h>=18&&h<24)g='晚上好';else g='夜深了';
   const t='hi，'+g,el=document.getElementById('splashText');
   el.innerHTML=t.split('').map((c,i)=>`<span class="splash-char" style="animation-delay:${i*80}ms">${c}</span>`).join('');
-  let d=false;function dismiss(){if(d)return;d=true;document.getElementById('splash').classList.add('fadeout');setTimeout(()=>{const s=document.getElementById('splash');if(s)s.remove()},500);if(!(window.MinisBridge&&typeof window.MinisBridge.setFullscreen==='function')&&document.documentElement.requestFullscreen)document.documentElement.requestFullscreen().then(()=>{lockOrientation()}).catch(()=>{})}
+  let d=false;function dismiss(){if(d)return;d=true;document.getElementById('splash').classList.add('fadeout');setTimeout(()=>{const s=document.getElementById('splash');if(s)s.remove()},500);lockOrientation()  /* 全屏已按用户要求移除，这里只锁竖屏 */}
   document.getElementById('splash').addEventListener('click',dismiss);
   setTimeout(dismiss,1500+t.length*80);
 })();
@@ -771,7 +788,23 @@ function gb(){return safeRead(BK,{})}
 function sb(d){safeWrite(()=>localStorage.setItem(BK,JSON.stringify(d)))}
 function ga(){return safeRead(AK,DA)}
 function sa(d){safeWrite(()=>localStorage.setItem(AK,JSON.stringify(d)))}
-function mtx(){return atx().filter(t=>t.time.slice(0,7)===cm).sort((a,b)=>b.time.localeCompare(a.time))}
+/* ★ 2026-11-07 用户：流水要「最新的在最上面」。
+   旧代码同一天的记录 time 全是 T12:00:00（只存了日期没存时刻），排序时全部相等
+   → 稳定排序保持插入顺序 → 刚记的那笔反而掉到最下面。
+   现在：① 新记录存真实时刻 + createdAt ② 排序用 createdAt / 数组下标兜底
+   ③ 老的 T12:00:00 是「不知道几点」，按日期排序不受影响。 */
+function txOrder(list){
+  const pos={};
+  atx().forEach((t,i)=>{pos[t.id]=i});
+  return list.slice().sort((a,b)=>{
+    const c=b.time.localeCompare(a.time);
+    if(c)return c;
+    const ca=(b.createdAt||0)-(a.createdAt||0);
+    if(ca)return ca;
+    return (pos[b.id]||0)-(pos[a.id]||0);      // 同一时刻：后记的排前面
+  });
+}
+function mtx(){return txOrder(atx().filter(t=>t.time.slice(0,7)===cm))}
 
 // ── Investment accounts ──
 const DI=[{name:'场内-我的',amount:0,month:'',ours:true},{name:'场外-我的',amount:0,month:'',ours:true},{name:'场外-别人的',amount:0,month:'',ours:false}];
@@ -892,7 +925,7 @@ function rtx(){
   // 先按账户、按时间正序累加该账户此时点的余额
   let balAt={};
   if(!sq){
-    const all=atx().slice().sort((a,b)=>a.time.localeCompare(b.time));
+    const all=txOrder(atx()).reverse();   // 正序算余额（同一时刻按记录先后）
     const accMap={};
     all.forEach(t=>{
       if(t.type==='transfer'){const fee=t.fee||0,fp=t.feePayer||'from';
@@ -908,6 +941,9 @@ function rtx(){
   l.innerHTML=!f.length?(sq?'<div class="empty-state">没有匹配"'+sq+'"</div>':'<div class="empty-state">本月暂无记录<br>点 + 开始记账</div>'):f.map((t,i)=>{
     const isE=t.type==='expense',isI=t.type==='income',isT=t.type==='transfer';
     let sign=isE?'−':isI?'+':'⇄';const d=new Date(t.time);
+    /* 有真实时刻就显示 HH:MM；老的 T12:00:00 表示"只记了日期"，不显示假时间 */
+    const hasTime=!/T12:00:00/.test(t.time);
+    const when=(d.getMonth()+1)+'/'+d.getDate()+(hasTime?' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'):'');
     // 该笔后的余额
     let balHtml='';
     if(!sq&&(balAt[t.id])!==undefined){
@@ -919,7 +955,7 @@ function rtx(){
       }
     }
     return `<div class="tx-item" style="animation-delay:${i*55}ms" onclick="editTx('${t.id}')">
-      <div class="info"><div class="title">${t.note||(isT?'转账':isE?'支出':'收入')}${isT&&t.fee?`<span style="font-size:11px;color:var(--text3)"> 手续费 ¥${t.fee.toFixed(2)}(${t.feePayer==='to'?'转入方付':'转出方付'})</span>`:''}${t.auto?'<span class="auto-tag">自动</span>':''}${t.instGroup?`<span class="auto-tag" style="color:var(--gold)">分期${t.instIdx}/${t.instTotal}</span>`:''}</div><div class="meta">${d.getMonth()+1}/${d.getDate()} · ${isT?t.from+' → '+t.to:[t.account,t.category].filter(Boolean).join(' · ')}</div>${balHtml}</div>
+      <div class="info"><div class="title">${t.note||(isT?'转账':isE?'支出':'收入')}${isT&&t.fee?`<span style="font-size:11px;color:var(--text3)"> 手续费 ¥${t.fee.toFixed(2)}(${t.feePayer==='to'?'转入方付':'转出方付'})</span>`:''}${t.auto?'<span class="auto-tag">自动</span>':''}${t.instGroup?`<span class="auto-tag" style="color:var(--gold)">分期${t.instIdx}/${t.instTotal}</span>`:''}</div><div class="meta">${when} · ${isT?t.from+' → '+t.to:[t.account,t.category].filter(Boolean).join(' · ')}</div>${balHtml}</div>
       <div class="amount ${isE?'exp':isI?'inc':''}" style="${isT?'color:var(--gold)':''}">${sign}¥${t.amount.toFixed(2)}</div>
       <div class="del-btn" onclick="event.stopPropagation();delTx('${t.id}')">×</div>
     </div>`;
@@ -1033,6 +1069,13 @@ function rac(){
 function switchView(v){cv=v;document.querySelectorAll('.tab-btn').forEach(t=>t.classList.remove('active'));document.querySelector(`.tab-btn:nth-child(${v==='tx'?1:v==='stats'?2:3})`).classList.add('active');document.getElementById('txList').style.display=v==='tx'?'block':'none';document.getElementById('statsView').classList.toggle('show',v==='stats');document.getElementById('acctsView').classList.toggle('show',v==='accts');document.getElementById('fab').style.display=v==='tx'?'block':'none';if(v==='stats')rss();if(v==='accts')rac()}
 
 // ── Transaction CRUD ──
+/* 记账时刻：记今天 → 用当前时钟；补记过去某天 → 只留日期（12:00:00 当"不知道几点"的哨兵） */
+function txClock(dateStr){
+  const n=new Date();
+  const t=n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0');
+  if(dateStr!==t) return '12:00:00';
+  return [n.getHours(),n.getMinutes(),n.getSeconds()].map(v=>String(v).padStart(2,'0')).join(':');
+}
 function openTxModal(id,pretype){
   eid=id||null;const t=id?atx().find(x=>x.id===id):null;
   document.getElementById('txModalTitle').textContent=id?'编辑':'记一笔';
@@ -1049,11 +1092,81 @@ function openTxModal(id,pretype){
   document.getElementById('txSubmit').textContent=id?'保存':pt==='transfer'?'确认转账':'确认'+(pt==='expense'?'支出':'收入');
   document.getElementById('txModal').classList.add('show');
 }
+/* ============ 还款（2026-11-07） ============
+   用户：「花呗还款现在都是转账，太麻烦，能不能直接还款多少、选账户、完事」。
+   本质就是一笔 transfer（来源账户 → 花呗），但把两次选择压成一步：
+   金额默认填欠款全额，来源账户点一下就选。 */
+var REPAY_TARGET = '花呗';
+var repayFromAcct = '';
+
+function debtOf(acct) {
+  var b = getCashBalances()[acct] || 0;
+  return b < 0 ? Math.round(-b * 100) / 100 : 0;   // 负数余额 = 欠款
+}
+
+function openRepay() {
+  repayFromAcct = '';
+  var debt = debtOf(REPAY_TARGET);
+  var bal = getCashBalances()[REPAY_TARGET] || 0;
+  var el = document.getElementById('repayDebt');
+  if (debt > 0) {
+    el.innerHTML = REPAY_TARGET + ' 当前欠款 <b style="color:var(--red);font-size:15px">¥' + debt.toFixed(2) + '</b>';
+  } else {
+    el.innerHTML = REPAY_TARGET + ' 当前余额 ¥' + bal.toFixed(2) + '，没有欠款（仍可先记一笔还款，余额会变成正数）';
+  }
+  document.getElementById('repayAmount').value = debt > 0 ? debt.toFixed(2) : '';
+  /* 来源账户：所有现金账户里除去被还的那个 */
+  var box = document.getElementById('repayFrom');
+  var opts = ga().filter(function (a) { return a !== REPAY_TARGET && a.indexOf('(理财)') < 0; });
+  box.innerHTML = opts.map(function (a) {
+    var v = getCashBalances()[a] || 0;
+    return '<button class="picker-trigger" data-acct="' + a + '" onclick="pickRepayFrom(\'' + a + '\',this)" style="flex:0 0 auto;font-size:13px">'
+      + a + '<span style="color:var(--text3);font-size:11px"> ¥' + v.toFixed(0) + '</span></button>';
+  }).join('') || '<span style="font-size:12px;color:var(--text3)">没有可用账户</span>';
+  document.getElementById('repayModal').classList.add('show');
+}
+
+function pickRepayFrom(a, btn) {
+  repayFromAcct = a;
+  document.querySelectorAll('#repayFrom .picker-trigger').forEach(function (b) { b.classList.remove('selected'); });
+  if (btn) btn.classList.add('selected');
+}
+
+function repayAll() {
+  var debt = debtOf(REPAY_TARGET);
+  document.getElementById('repayAmount').value = debt > 0 ? debt.toFixed(2) : '';
+}
+
+function closeRepay() { document.getElementById('repayModal').classList.remove('show'); }
+
+function saveRepay() {
+  var a = parseFloat(document.getElementById('repayAmount').value);
+  if (!a || a <= 0) return ts('请输入还款金额');
+  if (!repayFromAcct) return ts('请选择从哪个账户还');
+  var d = new Date();
+  var ds = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  var data = atx();
+  data.push({
+    id: uid(), time: ds + 'T' + txClock(ds), createdAt: Date.now(),
+    type: 'transfer', amount: a, from: repayFromAcct, to: REPAY_TARGET,
+    note: REPAY_TARGET + '还款'
+  });
+  stx(data);
+  applyInvDelta(repayFromAcct, -a);
+  applyInvDelta(REPAY_TARGET, a);
+  closeRepay(); ra();
+  var left = debtOf(REPAY_TARGET);
+  ts(left > 0 ? ('已还 ¥' + a.toFixed(2) + '，还欠 ¥' + left.toFixed(2)) : ('已还 ¥' + a.toFixed(2) + '，' + REPAY_TARGET + '已结清'));
+}
+
 function closeTxModal(){document.getElementById('txModal').classList.remove('show');eid=null}
 function saveTx(){
   const a=parseFloat(document.getElementById('txAmount').value),n=document.getElementById('txNote').value.trim(),d=document.getElementById('txDate').value;
   if(!a||a<=0)return ts('请输入金额');if(!d)return ts('请选择日期');
-  const data=atx();const entry={id:eid||uid(),time:d+'T12:00:00',type:ct,amount:a,note:n};
+  const data=atx();const entry={id:eid||uid(),time:d+'T'+txClock(d),type:ct,amount:a,note:n};
+  /* createdAt：同一天同一秒记两笔时用来定先后（新的在上面） */
+  if(!eid) entry.createdAt=Date.now();
+  else { const old0=data.find(t=>t.id===eid); if(old0&&old0.createdAt) entry.createdAt=old0.createdAt; }
   if(ct==='transfer'){entry.from=document.getElementById('txFromBtn').textContent;entry.to=document.getElementById('txToBtn').textContent;if(entry.from==='转出'||entry.to==='转入')return ts('请选择账户');if(entry.from===entry.to)return ts('不能转到同一账户');const fee=parseFloat(document.getElementById('txFee').value)||0;if(fee>0){entry.fee=fee;entry.feePayer=document.getElementById('txFeePayer').value}else{delete entry.fee;delete entry.feePayer}}
   else{entry.account=document.getElementById('txAcctBtn').textContent;entry.category=document.getElementById('txCatBtn').textContent;if(entry.account==='账户')entry.account='';if(entry.category==='分类')entry.category=''}
   // 针对已有交易(编辑)先回滚理财金额
@@ -3525,18 +3638,8 @@ ra();
   document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible' && bridgeOK()){ startPoll(); ensureNotifAlive(); autoBookkeep(); } });
   window.addEventListener('focus',()=>{ if(bridgeOK()){ ensureNotifAlive(); autoBookkeep(); } });
 })();
-// Fullscreen toggle
-function toggleFS(){
-  if(window.MinisBridge && typeof window.MinisBridge.isFullscreen==='function'){
-    try{
-      const on = !window.MinisBridge.isFullscreen();
-      window.MinisBridge.setFullscreen(on);
-      ts(on?('已进入全屏'):'已退出全屏');
-      return;
-    }catch(e){}
-  }
-  if(!document.fullscreenElement){document.documentElement.requestFullscreen().then(()=>{lockOrientation()}).catch(()=>{ts('不支持全屏')})}else{document.exitFullscreen()}
-}
+/* 全屏：2026-11-07 用户要求删掉（做成 APK 之后由原生控制，这个按钮没用）。
+   lockOrientation 留着 —— 它管的是「别横过来」和「回到前台重新锁竖屏」。 */
 // Lock to portrait; re-lock on orientation change (handles screen off/on)
 function lockOrientation(){
   // APK 环境下全屏由原生桥控制，不再用 requestFullscreen（会黑屏）

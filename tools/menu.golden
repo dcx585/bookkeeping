@@ -14,6 +14,9 @@ openPicker
 openPicker
 saveTx
 closeTxModal
+repayAll
+saveRepay
+closeRepay
 closePicker
 openImportNotify
 openRecon
@@ -85,7 +88,7 @@ calcTransfer
 closeCalc
 closeSearch
 openSearch
-toggleFS
+openRepay
 openMore
 -()
 -()
