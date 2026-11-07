@@ -1867,7 +1867,11 @@ function openA11y(){
   try{ if(window.MinisBridge && window.MinisBridge.openA11ySettings) window.MinisBridge.openA11ySettings(); }catch(e){}
 }
 function reconnectNotif(){
-  if(window.MinisBridge && typeof window.MinisBridge.requestRebind==='function'){
+  /* 新的桥 reconnectListener = 主动 requestRebind + 顺带把常驻服务拉起来 */
+  if(window.MinisBridge && typeof window.MinisBridge.reconnectListener==='function'){
+    try{ window.MinisBridge.reconnectListener(); }catch(e){}
+    try{ if(window.MinisBridge.keepAliveSet && autoEnabled()) window.MinisBridge.keepAliveSet(true); }catch(e){}
+  } else if(window.MinisBridge && typeof window.MinisBridge.requestRebind==='function'){
     try{ window.MinisBridge.requestRebind(); }catch(e){}
   }
   // ★ 重连后立刻主动扫一次通知栏，并把结果写进证据，
@@ -1876,7 +1880,7 @@ function reconnectNotif(){
     try{ window.MinisBridge.triggerScan(); }catch(e){}
   }
   ts('已请求重连，2秒后自动重新检测…');
-  setTimeout(()=>{ refreshImpStatus(); doImportScan(); }, 2000);
+  setTimeout(()=>{ refreshImpStatus(); doImportScan(); syncListener(2); }, 2000);
 }
 function selfTestParse(){
   // 不用付钱就能验证：把常见的真实通知文本喂进解析链路，看能不能出金额
@@ -3377,6 +3381,28 @@ function paintSwitch(el, on) {
 function openAutoPanel() {
   renderAutoPanel();
   document.getElementById('autoModal').classList.add('show');
+  /* ★ 2026-11-07：授权了但服务断开 = 现在收到的通知不会被记账。
+     打开面板就自动踢一次重连，然后连查 3 次（系统绑回来要 1-2 秒）。 */
+  syncListener(3);
+}
+
+/* 重连 + 复查。没连上就再来一次，最多试 n 轮 */
+function syncListener(n) {
+  var bridge = window.MinisBridge;
+  if (!bridge || !autoEnabled()) return;
+  var tries = 0;
+  window.__syncTried = 0;
+  function step() {
+    tries++;
+    var st = null;
+    try {
+      st = JSON.parse(typeof bridge.reconnectListener === 'function' ? bridge.reconnectListener() : bridge.notifStatus());
+    } catch (e) {}
+    if (!st || st.connected) { window.__syncTried = 0; renderAutoPanel(); return; }
+    if (tries > n) { window.__syncTried = tries - 1; renderAutoPanel(); return; }
+    setTimeout(step, 900);
+  }
+  step();
 }
 function renderAutoPanel() {
   var sum = document.getElementById('autoSummary');
@@ -3390,14 +3416,26 @@ function renderAutoPanel() {
   if (!autoEnabled()) {
     lines.push('<b style="color:#b4513c">自动记账已关闭</b> —— 不读通知、不弹框、不自动写入。想恢复点上面的开关。');
   } else {
-    lines.push('监听：' + (ka ? '常驻中' : '未常驻') + ' · 待处理 ' + (window.__autoLastCount || 0) + ' 条');
+    var st0 = null;
+    try { st0 = JSON.parse(window.MinisBridge.notifStatus()); } catch (e) {}
+    var kaRun = st0 ? st0.ka : null;
+    lines.push('监听：' + (ka ? (kaRun === false ? '常驻开关开着，服务没跑' : '常驻中') : '未常驻') +
+               ' · 待处理 ' + (window.__autoLastCount || 0) + ' 条');
     try {
-      var st = JSON.parse(window.MinisBridge.notifStatus());
+      var st = st0 || JSON.parse(window.MinisBridge.notifStatus());
       lines.push('系统授权：' + (st.granted ? '<b style="color:#2e7d32">已授权</b>' : '<b style="color:#b4513c">未授权</b>') +
                  ' · 监听服务：' + (st.connected ? '<b style="color:#2e7d32">已连接</b>' : '<b style="color:#b4513c">断开了</b>') +
                  ' · 队列 ' + (st.queue || 0) + ' 条');
       if (st.granted && !st.connected) {
-        lines.push('授权了但服务断开 —— 这就是「用几天就不记了」的原因，打开一次 App 会重新连上；常驻开关能减少复发。');
+        lines.push('<b style="color:#b4513c">现在收到的通知不会被记账</b> —— 系统允许监听，但服务这个瞬间没接上。');
+        lines.push(window.__syncTried ? ('已自动重连 ' + window.__syncTried + ' 次，还是没连上 —— 点下面的「重新连接」再试，或去系统设置把「账」的通知使用权<b>关掉再打开</b>一次（国产 ROM 常把服务冻住但设置项仍显示已授权）。')
+                                       : '正在自动重连，等一两秒…');
+        if (window.__syncTried) lines.push('如果重开权限后仍然「断开」，说明这台手机的 ROM 不允许后台绑定，自动记账只能在你打开 App 时工作。');
+      } else if (st.granted && st.connected) {
+        lines.push('服务已连接 —— 收到支付通知会自动记。');
+      }
+      if (ka && st && st.ka === false) {
+        lines.push('⚠ 常驻服务没在跑（被系统清了）。点「重新连接」会把它拉起来；也建议加电池白名单。');
       }
     } catch (e) { lines.push('拿不到系统状态（不在 App 里？）'); }
   }
