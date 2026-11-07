@@ -277,6 +277,10 @@ input[type=checkbox]{accent-color:var(--accent)}
 .search-bar{display:flex;align-items:center;gap:8px;margin:0 16px 8px;position:relative;z-index:2}
 .search-bar input{flex:1;padding:10px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;background:var(--surface);color:var(--text);outline:none;font-family:inherit}
 .search-bar input:focus{border-color:var(--accent)}
+
+/* 自动记账面板里的开关：别撑满整行 */
+#autoSw, #kaSw{width:74px;min-width:74px;max-width:74px;padding:8px 0;flex:0 0 auto;font-size:13px}
+#autoModal .sheet{max-height:82vh;overflow-y:auto}
 </style>
 </head>
 <body>
@@ -387,6 +391,7 @@ input[type=checkbox]{accent-color:var(--accent)}
       <button class="cancel-btn" onclick="openRecon();closeMore()" style="margin:0">⚖️ 余额对账</button>
       <button class="cancel-btn" onclick="openBudgetSettings();closeMore()" style="margin:0">📊 预算设置</button>
       <button class="cancel-btn" onclick="openParserDiag();closeMore()" style="margin:0">🔍 解析诊断</button>
+      <button class="cancel-btn" onclick="openAutoPanel();closeMore()" style="margin:0">🤖 自动记账</button>
       <button class="cancel-btn" onclick="backupData();closeMore()" style="margin:0">💾 备份</button>
     </div>
     <div class="fold-head" onclick="exFold(this,'moreFold')"><span>其余功能</span><span class="fold-arrow">▾</span></div>
@@ -403,6 +408,28 @@ input[type=checkbox]{accent-color:var(--accent)}
       </div>
     </div>
     <button class="cancel-btn" onclick="closeMore()" style="margin-top:10px">关闭</button>
+  </div>
+</div>
+
+<div class="modal" id="autoModal">
+  <div class="sheet"><h3>自动记账</h3>
+    <div id="autoSummary" style="font-size:12.5px;color:var(--text2);line-height:1.8;margin-bottom:12px"></div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid var(--line)">
+      <div><div style="font-size:14px">自动识别支付</div>
+        <div style="font-size:11.5px;color:var(--text2);margin-top:2px">关掉后不再读通知，也不弹待处理框</div></div>
+      <button class="cancel-btn" id="autoSw" style="margin:0;min-width:66px" onclick="toggleAutoOn()">开</button>
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid var(--line)">
+      <div><div style="font-size:14px">常驻后台</div>
+        <div style="font-size:11.5px;color:var(--text2);margin-top:2px">留一条安静的通知把进程钉住，通知监听才不会断</div></div>
+      <button class="cancel-btn" id="kaSw" style="margin:0;min-width:66px" onclick="toggleKeepAlive()">开</button>
+    </div>
+
+    <button class="cancel-btn" onclick="askBatteryWaiver()" style="margin:12px 0 0">🔋 加入电池白名单（国产系统必做）</button>
+    <div id="autoUnparsed" style="font-size:11.5px;color:var(--text2);line-height:1.7;margin-top:10px"></div>
+    <button class="cancel-btn" onclick="document.getElementById('autoModal').classList.remove('show')" style="margin-top:10px">关闭</button>
   </div>
 </div>
 
@@ -3218,7 +3245,92 @@ function makeTx(e,overrides){
 
 let autoQueue=[], autoIdx=-1, pendingAutoCount=0, autoRunning=false;
 
+/* ============ 自动记账总开关（2026-11-07） ============
+   用户的底线：「这一次再搞不定就取消自动记账」。
+   所以给一个干净的总开关：关掉 = 不读通知、不轮询、不弹框、不自动写入，
+   回到纯手动记账，别的功能一个都不受影响。 */
+var AUTO_ON_KEY = 'bk_auto_on';
+function autoEnabled() { try { return localStorage.getItem(AUTO_ON_KEY) !== '0'; } catch (e) { return true; } }
+function keepAliveState() {
+  try { return JSON.parse(window.MinisBridge.keepAliveStatus()).on === true; } catch (e) { return false; }
+}
+function paintSwitch(el, on) {
+  if (!el) return;
+  el.textContent = on ? '开' : '关';
+  el.style.background = on ? 'var(--accent)' : '';
+  el.style.color = on ? '#fff' : '';
+  el.style.borderColor = on ? 'var(--accent)' : '';
+}
+function openAutoPanel() {
+  renderAutoPanel();
+  document.getElementById('autoModal').classList.add('show');
+}
+function renderAutoPanel() {
+  var sum = document.getElementById('autoSummary');
+  if (!sum) return;
+  paintSwitch(document.getElementById('autoSw'), autoEnabled());
+  var ka = false;
+  try { ka = keepAliveState(); } catch (e) {}
+  paintSwitch(document.getElementById('kaSw'), ka);
+
+  var lines = [];
+  if (!autoEnabled()) {
+    lines.push('<b style="color:#b4513c">自动记账已关闭</b> —— 不读通知、不弹框、不自动写入。想恢复点上面的开关。');
+  } else {
+    lines.push('监听：' + (ka ? '常驻中' : '未常驻') + ' · 待处理 ' + (window.__autoLastCount || 0) + ' 条');
+    try {
+      var st = JSON.parse(window.MinisBridge.notifStatus());
+      lines.push('系统授权：' + (st.granted ? '<b style="color:#2e7d32">已授权</b>' : '<b style="color:#b4513c">未授权</b>') +
+                 ' · 监听服务：' + (st.connected ? '<b style="color:#2e7d32">已连接</b>' : '<b style="color:#b4513c">断开了</b>') +
+                 ' · 队列 ' + (st.queue || 0) + ' 条');
+      if (st.granted && !st.connected) {
+        lines.push('授权了但服务断开 —— 这就是「用几天就不记了」的原因，打开一次 App 会重新连上；常驻开关能减少复发。');
+      }
+    } catch (e) { lines.push('拿不到系统状态（不在 App 里？）'); }
+  }
+  sum.innerHTML = lines.join('<br>');
+
+  var u = [];
+  try { u = JSON.parse(localStorage.getItem('bk_auto_unparsed') || '[]'); } catch (e) {}
+  var box = document.getElementById('autoUnparsed');
+  if (box) {
+    box.innerHTML = u.length
+      ? '最近没认出金额的 ' + u.length + ' 条（原文，下次对症用）：<br>' +
+        u.slice(-3).reverse().map(function (x) { return '· ' + String(x).slice(0, 60); }).join('<br>')
+      : '';
+  }
+}
+function toggleAutoOn() {
+  var on = !autoEnabled();
+  try { localStorage.setItem(AUTO_ON_KEY, on ? '1' : '0'); } catch (e) {}
+  if (on) { try { window.MinisBridge.keepAliveSet(true); } catch (e) {} autoBookkeep(); }
+  else {
+    autoQueue = []; pendingAutoCount = 0;
+    /* 关掉时把队列清空 —— 否则过几天再打开，7 天内的通知会一股脑全灌进来 */
+    (async function () {
+      try {
+        var q = await readPendingQueue();
+        var ids = (q || []).map(function (n) { return n.id; }).filter(Boolean);
+        if (ids.length) ackPending(ids);
+      } catch (e) {}
+    })();
+  }
+  renderAutoPanel();
+  toast(on ? '自动记账已打开' : '自动记账已关闭，之后只走手动记账');
+}
+function toggleKeepAlive() {
+  var on = !keepAliveState();
+  try { localStorage.setItem('bk_ka_choice', '1'); } catch (e) {}
+  try { window.MinisBridge.keepAliveSet(on); } catch (e) {}
+  setTimeout(renderAutoPanel, 200);
+  toast(on ? '已常驻后台' : '已取消常驻');
+}
+function askBatteryWaiver() {
+  try { window.MinisBridge.askBatteryWhitelist(); } catch (e) { toast('这条要装到手机上才有效'); }
+}
+
 async function autoBookkeep(){
+  if(!autoEnabled()) return;
   if(autoRunning) return; autoRunning=true;
   try{
   const q=await readPendingQueue();
@@ -3228,7 +3340,17 @@ async function autoBookkeep(){
   for(const n of q){
     const nid=n.id||('q_'+Date.now()+'_'+Math.random().toString(36).slice(2,6));
     const es=parseNotifFull(n);   // 可能多笔
-    if(!es.length){ autoAck.push(nid); continue; }  // 非支付通知
+    if(!es.length){
+      /* ★ 2026-11-07：这条已经过了原生过滤（说明长得像支付），却没认出金额。
+         以前直接 ack 掉了 —— 等于钱花了、账没记、还查不出来是谁。
+         现在照旧 ack（不重复弹），但把原文留一份，在「自动记账」面板里能看到。 */
+      try{
+        var _u=JSON.parse(localStorage.getItem('bk_auto_unparsed')||'[]');
+        var _t=((n.pkg||'')+' | '+(n.title||'')+' | '+(n.text||'')).replace(/\s+/g,' ').trim();
+        if(_t && _u.indexOf(_t)<0){ _u.push(_t); if(_u.length>20) _u=_u.slice(-20); localStorage.setItem('bk_auto_unparsed',JSON.stringify(_u)); }
+      }catch(e){}
+      autoAck.push(nid); continue;
+    }
     let anyAuto=false, anyConfirm=false;
     for(const e of es){
       if(seen.has(e.finger)||isAlreadyBooked(e)){ anyAuto=true; continue; }
@@ -3249,6 +3371,7 @@ async function autoBookkeep(){
     else if(!anyAuto && !anyConfirm && es.length) autoAck.push(nid);
   }
   stx(tx);
+  window.__autoLastCount = confirmItems.length;
   if(autoN>0){ ra(); pendingAutoCount+=autoN; appendAutoLog(autoLog); }
   if(confirmItems.length){
     autoQueue=confirmItems; autoIdx=0;
@@ -3350,6 +3473,12 @@ ra();
 // 这是解决"打开app也不自动"的核心 — 只要页面活着，就定期检查队列并处理。
 (function(){
   const bridgeOK = ()=> window.MinisBridge && (typeof window.MinisBridge.readPendingTx==='function'||typeof window.MinisBridge.readImportedTx==='function');
+  /* 首次进来：自动记账是开着的，就顺手把常驻也打开（用户明确关过的不动） */
+  try{
+    if(bridgeOK() && autoEnabled() && !localStorage.getItem('bk_ka_choice')){
+      window.MinisBridge.keepAliveSet(true); localStorage.setItem('bk_ka_choice','1');
+    }
+  }catch(e){}
   // 1) 页面加载后立即尝试（等 bridge 就绪，最长重试10次×300ms）
   (function tryImmediate(){
     if(bridgeOK()){ autoBookkeep(); }

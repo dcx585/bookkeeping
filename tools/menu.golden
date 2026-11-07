@@ -19,6 +19,7 @@ openImportNotify
 openRecon
 openBudgetSettings
 openParserDiag
+openAutoPanel
 backupData
 openCalc
 openBgModal
@@ -29,6 +30,10 @@ restoreData
 openSnapshots
 openSearch
 closeMore
+toggleAutoOn
+toggleKeepAlive
+askBatteryWaiver
+getElementById
 restoreLatestSnapshot
 getElementById
 exportCSVRange
