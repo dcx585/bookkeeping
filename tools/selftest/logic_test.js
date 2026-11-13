@@ -11,8 +11,8 @@ function P(text,extra){ return Object.assign({title:'',text:text,app:'',time:Dat
 console.log('\n========== A. 金额解析 ==========');
 {
   const cases=[
-    ['尾号2374卡9月19日20:43支出(消费支付宝-杭州深度求索人工智能基础技…)20元，余额169.10元',20,'余额169.10 不能被当金额'],
-    ['您尾号1234的储蓄卡账户9月20日14时30分收入人民币100.00元，余额500.00元',100,'收入100'],
+    ['尾号5678卡9月19日20:43支出(消费支付宝-某服务商人工智能基础技…)20元，余额386.20元',20,'余额386.20 不能被当金额'],
+    ['您尾号1234的储蓄卡账户9月20日14时30分收入人民币92.00元，余额500.00元',92,'收入92'],
     ['您账户1234于09月20日14:30网上支付人民币-35.50',35.5,'负数金额取绝对值'],
     ['微信支付：已支付¥15.80',15.8,'¥符号'],
     ['你已成功付款 25.00 元',25,'元字'],
@@ -31,7 +31,7 @@ console.log('\n========== B. 非支付必须剔除 ==========');
   const cases=[
     ['验证码123456，5分钟内有效，请勿泄露','验证码'],
     ['【银行】办卡享好礼，额度5万元，回复TD退订','营销'],
-    ['【工商银行】您尾号2374卡，余额1823.44元','纯余额提醒'],
+    ['【工商银行】您尾号5678卡，余额1823.44元','纯余额提醒'],
     ['您的话费余额不足，请及时充值，避免停机','催缴(无已完成词)'],
     ['【顺丰】您的包裹已派送，取件码1234','物流'],
     ['【某行】您本月账单应还5000.00元，请于25日前还款','催缴账单'],
@@ -43,20 +43,20 @@ console.log('\n========== B. 非支付必须剔除 ==========');
   });
 }
 
-console.log('\n========== C. 面额 vs 实付（充值100实付96）==========');
+console.log('\n========== C. 面额 vs 实付（充值92实付88）==========');
 {
-  // 场景：运营商短信(面额100) + 银行短信(实付96)
-  const notice={title:'',text:'您已成功充值100.00元，感谢使用',app:'',time:Date.now(),_boxKey:'n1',_time:Date.now()};
-  const bank  ={title:'',text:'尾号2374卡9月19日20:43支出96.00元，余额100.00元',app:'',time:Date.now(),_boxKey:'n2',_time:Date.now()+1000};
+  // 场景：运营商短信(面额92) + 银行短信(实付88)
+  const notice={title:'',text:'您已成功充值92.00元，感谢使用',app:'',time:Date.now(),_boxKey:'n1',_time:Date.now()};
+  const bank  ={title:'',text:'尾号5678卡9月19日20:43支出88.00元，余额92.00元',app:'',time:Date.now(),_boxKey:'n2',_time:Date.now()+1000};
   const pn=X.parseNotifFull(notice), pb=X.parseNotifFull(bank);
-  ok('运营商短信解析出面额100', pn.length>0 && pn[0].amount===100, JSON.stringify(pn));
-  ok('银行短信解析出实付96', pb.length>0 && pb[0].amount===96, JSON.stringify(pb));
+  ok('运营商短信解析出面额92', pn.length>0 && pn[0].amount===92, JSON.stringify(pn));
+  ok('银行短信解析出实付88', pb.length>0 && pb[0].amount===88, JSON.stringify(pb));
   if(pn.length&&pb.length){
     const e1=Object.assign({},pn[0],{_boxKey:'n1',_time:notice.time,_src:'sms'});
     const e2=Object.assign({},pb[0],{_boxKey:'n2',_time:bank.time,_src:'sms'});
     const merged=X.mergePool([e1,e2]);
     ok('★ 面额+实付 合并成 1 条（不是196）', merged.length===1, '合并后 '+merged.length+' 条: '+JSON.stringify(merged.map(x=>x.amount)));
-    if(merged.length===1) ok('★ 合并后保留实付96', Math.abs(merged[0].amount-96)<0.005, '实际 '+merged[0].amount);
+    if(merged.length===1) ok('★ 合并后保留实付88', Math.abs(merged[0].amount-88)<0.005, '实际 '+merged[0].amount);
   }
 }
 

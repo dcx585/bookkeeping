@@ -11,11 +11,11 @@ function mk(o){return Object.assign({type:'expense',category:'话费',account:''
 
 // ── BUG-1 面额/实付配对失败 → 196 重复记账（用户亲历的那个） ──
 {
-  const a=mk({amount:100,note:'您已成功充值100.00元',account:'银行卡',_boxKey:'a',_time:t0});
-  const b=mk({amount:96,note:'尾号2374卡支出96.00元',account:'银行卡',_boxKey:'b',_time:t0+60000});
+  const a=mk({amount:100,note:'您已成功充值92.00元',account:'银行卡',_boxKey:'a',_time:t0});
+  const b=mk({amount:96,note:'尾号5678卡支出88.00元',account:'银行卡',_boxKey:'b',_time:t0+60000});
   const m1=X.mergePool([a,b]);
-  const c=mk({amount:100,note:'已成功充值100.00元',account:'',_boxKey:'c',_time:t0});
-  const d=mk({amount:96,note:'您9月19日支出96.00元',account:'',_boxKey:'d',_time:t0+60000});
+  const c=mk({amount:100,note:'已成功充值92.00元',account:'',_boxKey:'c',_time:t0});
+  const d=mk({amount:96,note:'您9月19日支出88.00元',account:'',_boxKey:'d',_time:t0+60000});
   const m2=X.mergePool([c,d]);
   if(m1.length!==1 || m2.length!==1){
     B('BUG-1 面额/实付识别失败导致重复记账',
@@ -29,7 +29,7 @@ function mk(o){return Object.assign({type:'expense',category:'话费',account:''
 // ── BUG-2 服务端队列正则解析遇 {} 断裂 ──
 {
   const re=/\{[^\{\}]*\}/g;
-  const bad='[{"id":"b1","nkey":"n1","text":"【建行】客户{张}消费96元"},{"id":"b2","nkey":"n2","text":"充值100元"}]';
+  const bad='[{"id":"b1","nkey":"n1","text":"【建行】客户{张}消费88元"},{"id":"b2","nkey":"n2","text":"充值100元"}]';
   let arr=[],m; while((m=re.exec(bad))) arr.push(m[0]);
   const withId=arr.filter(o=>/"id":"([^"]+)"/.test(o));
   if(withId.length!==2){
@@ -54,7 +54,7 @@ function mk(o){return Object.assign({type:'expense',category:'话费',account:''
   H.localStorage.setItem('minis_bookkeeping_v5',JSON.stringify([
     {id:'1',time:'2026-10-01T12:00:00',type:'expense',amount:96,account:'',category:'其他'}
   ]));
-  const noTime=mk({amount:96,note:'充值96元',account:'',_boxKey:'z'});
+  const noTime=mk({amount:96,note:'充值88元',account:'',_boxKey:'z'});
   if(X.isAlreadyBooked(noTime)) {
     R('isAlreadyBooked 在无时间戳时"放宽为匹配"（near() 返回 true）',
       '同一金额的历史记录会被当成"已入账"→ 新发生的同额消费可能被静默吞掉。');

@@ -45,33 +45,33 @@ const actual = {};
 
 // ── 1. 金额解析：各银行/支付 App 的真实措辞（含易错边界）──
 actual.parseAmount = [
-  '尾号2374卡9月19日20:43支出(消费支付宝-杭州深度求索…)20元，余额169.10元',
-  '您尾号1234的储蓄卡账户9月20日14时30分收入人民币100.00元，余额500.00元',
+  '尾号5678卡9月19日20:43支出(消费支付宝-某服务商…)20元，余额386.20元',
+  '您尾号1234的储蓄卡账户9月20日14时30分收入人民币92.00元，余额500.00元',
   '微信支付：已支付¥15.80',
   '【云闪付】您尾号3344的银行卡消费12.50元',
   '您账户1234于09月20日14:30网上支付人民币-35.50',
-  '您尾号2374卡充值话费100.00元',
+  '您尾号5678卡充值话费92.00元',
   '缴费成功200.00元',
-  '您已成功充值100.00元',
+  '您已成功充值92.00元',
 ].map(t => ({ in: t, out: X.parseNotifFull(P(t)).map(r => r.amount) }));
 
 // ── 2. 非支付必须被剔除（验证码/营销/余额提醒混进来是最常见的"新污染"）──
 actual.rejectNonPayment = [
   '【建设银行】验证码 123456，请勿告诉他人',
   '【淘宝】您的订单已发货',
-  '您尾号1234卡余额169.10元',
+  '您尾号1234卡余额386.20元',
   '微信支付：您有一笔待付款',
 ].map(t => ({ in: t, out: X.parseNotifFull(P(t)).length }));
 
 // ── 3. 面额/实付合并矩阵（这就是"196 元"那个 bug 的现场）──
 function mk(o) { return Object.assign({ type: 'expense', category: '话费', account: '', _src: 'sms', _time: T }, o); }
 const mergeCases = [
-  ['标准',           mk({ amount: 100, note: '您已成功充值100.00元', _boxKey: 'a' }), mk({ amount: 96, note: '尾号2374卡支出96.00元', account: '银行卡', _boxKey: 'b', _time: T + 60000 })],
-  ['充值带银行卡',   mk({ amount: 100, note: '您已成功充值100.00元', account: '银行卡', _boxKey: 'c' }), mk({ amount: 96, note: '尾号2374卡支出96.00元', account: '银行卡', _boxKey: 'd', _time: T + 60000 })],
-  ['银行措辞弱',     mk({ amount: 100, note: '已成功充值100.00元', _boxKey: 'e' }), mk({ amount: 96, note: '您9月19日支出96.00元', _boxKey: 'f', _time: T + 60000 })],
-  ['小折扣99→96',    mk({ amount: 99, note: '已成功充值99.00元', _boxKey: 'g' }), mk({ amount: 96, note: '尾号2374卡支出96.00元', account: '银行卡', _boxKey: 'h', _time: T + 60000 })],
-  ['折扣过大不合并', mk({ amount: 100, note: '已成功充值100.00元', _boxKey: 'i' }), mk({ amount: 30, note: '尾号2374卡支出30.00元', account: '银行卡', _boxKey: 'j', _time: T + 60000 })],
-  ['超窗不合并',     mk({ amount: 100, note: '充值100元', _boxKey: 'k' }), mk({ amount: 96, note: '尾号2374卡支出96.00元', account: '银行卡', _boxKey: 'l', _time: T + 20 * 60 * 1000 })],
+  ['标准',           mk({ amount: 100, note: '您已成功充值92.00元', _boxKey: 'a' }), mk({ amount: 96, note: '尾号5678卡支出88.00元', account: '银行卡', _boxKey: 'b', _time: T + 60000 })],
+  ['充值带银行卡',   mk({ amount: 100, note: '您已成功充值92.00元', account: '银行卡', _boxKey: 'c' }), mk({ amount: 96, note: '尾号5678卡支出88.00元', account: '银行卡', _boxKey: 'd', _time: T + 60000 })],
+  ['银行措辞弱',     mk({ amount: 100, note: '已成功充值92.00元', _boxKey: 'e' }), mk({ amount: 96, note: '您9月19日支出88.00元', _boxKey: 'f', _time: T + 60000 })],
+  ['小折扣99→96',    mk({ amount: 99, note: '已成功充值99.00元', _boxKey: 'g' }), mk({ amount: 96, note: '尾号5678卡支出88.00元', account: '银行卡', _boxKey: 'h', _time: T + 60000 })],
+  ['折扣过大不合并', mk({ amount: 100, note: '已成功充值92.00元', _boxKey: 'i' }), mk({ amount: 30, note: '尾号5678卡支出30.00元', account: '银行卡', _boxKey: 'j', _time: T + 60000 })],
+  ['超窗不合并',     mk({ amount: 100, note: '充值100元', _boxKey: 'k' }), mk({ amount: 96, note: '尾号5678卡支出88.00元', account: '银行卡', _boxKey: 'l', _time: T + 20 * 60 * 1000 })],
 ];
 actual.mergePool = mergeCases.map(([n, a, b]) => ({
   in: n,
@@ -81,10 +81,10 @@ actual.mergePool = mergeCases.map(([n, a, b]) => ({
 
 // ── 4. 识别函数互斥性（isRechargeItem × isBankItem 不得同时为真）──
 actual.mutualExclusive = [
-  ['已成功充值100.00元', ''],
-  ['尾号2374卡充值话费100.00元', '银行卡'],
-  ['尾号2374卡支出96.00元', '银行卡'],
-  ['您9月19日支出96.00元', ''],
+  ['已成功充值92.00元', ''],
+  ['尾号5678卡充值话费92.00元', '银行卡'],
+  ['尾号5678卡支出88.00元', '银行卡'],
+  ['您9月19日支出88.00元', ''],
   ['缴费成功200元', ''],
   ['您已成功付款25.00元', '微信'],
 ].map(([n, a]) => ({
