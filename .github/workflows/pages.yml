@@ -2,6 +2,8 @@ name: Deploy to Pages
 on:
   push:
     branches: [master]
+  workflow_dispatch:          # 允许手动触发（调试用）
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -14,8 +16,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v4
+
+      # 只上传要发布的内容，不把整个仓库（tools/ docs/ .github/）推到公网
+      - name: 收集发布文件
+        run: |
+          mkdir -p _site
+          cp index.html app.html manifest.json icon.svg sw.js _site/ 2>/dev/null || true
+          [ -f bg.jpg ] && cp bg.jpg _site/ || true
+          ls -la _site/
+
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
+
       - uses: actions/deploy-pages@v4
         id: deployment
