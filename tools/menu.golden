@@ -97,6 +97,7 @@ openMore
 -()
 restoreSnapshot
 quickAddRecurring
+closeAcctDetail
 addCustomBudget
 calcInsertAmount
 openA11y

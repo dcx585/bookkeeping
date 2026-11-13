@@ -1033,8 +1033,9 @@ function rac(){
   let cashTotal=0;
   document.getElementById('acctList').innerHTML=ga().map(a=>{
     const v=am[a]||0;cashTotal+=v;
-    return `<div class="acct-item">
+    return `<div class="acct-item" onclick="openAcctDetail('${a.replace(/'/g,"\\'")}')" style="cursor:pointer">
       <span class="acct-name">${a}</span>
+      <span style="font-size:11px;color:var(--text3);margin-left:auto;margin-right:6px">明细 ›</span>
       <span class="acct-val" style="color:${v<0?'var(--red)':'var(--green)'}">¥${v.toFixed(2)}</span>
       <span onclick="event.stopPropagation();deleteAcct('${a.replace(/'/g,"\\'")}')" style="color:var(--text3);margin-left:8px;cursor:pointer;font-size:14px;padding:0 4px">×</span>
     </div>`;
@@ -1059,13 +1060,130 @@ function rac(){
       </div>${sub}
     </div>`;
   }).join('');
-  // Total row
+  // Total row —— 总资产 + 两类拆分
   const grand=cashTotal+invTotal;
-  document.getElementById('totalRow').innerHTML=`<div class="acct-item" style="font-weight:700;border-bottom:none">
-    <span class="acct-name">总资产</span>
-    <span class="acct-val" style="color:var(--accent);font-size:16px">¥${grand.toLocaleString()}</span>
-  </div>`;
+  const pct=(n)=>grand>0?((n/grand)*100).toFixed(0)+'%':'—';
+  const fmt=(n)=>'¥'+Number(n||0).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
+  document.getElementById('totalRow').innerHTML=
+   `<div class="acct-item" style="font-weight:700;border-bottom:none">
+      <span class="acct-name">总资产</span>
+      <span class="acct-val" style="color:var(--accent);font-size:17px">${fmt(grand)}</span>
+    </div>
+    <div class="acct-item" style="padding-left:14px">
+      <span class="acct-name" style="color:var(--text2);font-weight:400">　其中 · 现金账户</span>
+      <span class="acct-val" style="color:var(--text2);font-size:14px;font-weight:500">${fmt(cashTotal)}
+        <span style="font-size:11px;color:var(--text3);margin-left:4px">${pct(cashTotal)}</span></span>
+    </div>
+    <div class="acct-item" style="padding-left:14px;border-bottom:none">
+      <span class="acct-name" style="color:var(--text2);font-weight:400">　其中 · 理财账户</span>
+      <span class="acct-val" style="color:var(--text2);font-size:14px;font-weight:500">${fmt(invTotal)}
+        <span style="font-size:11px;color:var(--text3);margin-left:4px">${pct(invTotal)}</span></span>
+    </div>`;
 }
+
+/* ══ 账户对账 ══
+   点账户看这个账户自己的账：收入多少、支出多少、转进多少、转出多少、手续费多少。
+   转账单独一类，显示 从哪→到哪 + 金额 + 手续费，不计入收支（否则会重复算）。 */
+function acctFlow(name){
+  const rows=[];let inc=0,exp=0,tIn=0,tOut=0,feeSum=0;
+  atx().forEach(t=>{
+    if(t.type==='transfer'){
+      const isFrom=t.from===name, isTo=t.to===name;
+      if(!isFrom&&!isTo)return;
+      const fee=Number(t.fee||0), fp=t.feePayer||'from';
+      const feeOnMe=(isFrom&&fp==='from')||(isTo&&fp==='to');
+      if(isFrom){tOut+=t.amount}                         // 转出本金
+      if(isTo){tIn+=t.amount}                            // 转入本金
+      if(feeOnMe)feeSum+=fee;                            // 我付的手续费
+      rows.push({t,kind:isFrom?'out':'in',fee:feeOnMe?fee:0});
+    }else if(t.account===name){
+      if(t.type==='income'){inc+=t.amount}else{exp+=t.amount}
+      rows.push({t,kind:t.type==='income'?'inc':'exp',fee:0});
+    }
+  });
+  rows.sort((a,b)=>(b.t.time||'').localeCompare(a.t.time||''));
+  const bal=inc-exp+tIn-tOut-feeSum;
+  return {rows,inc,exp,tIn,tOut,feeSum,bal};
+}
+function openAcctDetail(name){
+  const f=acctFlow(name);
+  const y=(n)=>`¥${Number(n||0).toFixed(2)}`;
+  const tag=(txt,color)=>`<span style="font-size:11px;padding:2px 7px;border-radius:6px;background:${color}22;color:${color}">${txt}</span>`;
+
+  const stat=`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      <div style="background:var(--bg);border-radius:10px;padding:10px">
+        <div style="font-size:11px;color:var(--text3)">当前余额</div>
+        <div style="font-size:17px;font-weight:700;color:${f.bal<0?'var(--red)':'var(--accent)'}">${y(f.bal)}</div>
+      </div>
+      <div style="background:var(--bg);border-radius:10px;padding:10px">
+        <div style="font-size:11px;color:var(--text3)">手续费合计</div>
+        <div style="font-size:17px;font-weight:700;color:var(--gold)">${y(f.feeSum)}</div>
+      </div>
+      <div style="background:var(--bg);border-radius:10px;padding:10px">
+        <div style="font-size:11px;color:var(--text3)">支出合计</div>
+        <div style="font-size:15px;font-weight:600;color:var(--red)">${y(f.exp)}</div>
+      </div>
+      <div style="background:var(--bg);border-radius:10px;padding:10px">
+        <div style="font-size:11px;color:var(--text3)">收入合计</div>
+        <div style="font-size:15px;font-weight:600;color:var(--green)">${y(f.inc)}</div>
+      </div>
+      <div style="background:var(--bg);border-radius:10px;padding:10px">
+        <div style="font-size:11px;color:var(--text3)">转出（不含手续费）</div>
+        <div style="font-size:15px;font-weight:600;color:var(--text2)">${y(f.tOut)}</div>
+      </div>
+      <div style="background:var(--bg);border-radius:10px;padding:10px">
+        <div style="font-size:11px;color:var(--text3)">转入</div>
+        <div style="font-size:15px;font-weight:600;color:var(--text2)">${y(f.tIn)}</div>
+      </div>
+    </div>`;
+
+  const list=f.rows.length?f.rows.map(({t,kind,fee})=>{
+    const d=new Date(t.time);
+    const hasTime=!/T12:00:00/.test(t.time);
+    const when=(d.getMonth()+1)+'/'+d.getDate()+(hasTime?' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'):'');
+    let title,sub,amt,color,sign;
+    if(t.type==='transfer'){
+      if(kind==='out'){
+        title=`转出 → ${t.to||'?'}`; sign='−'; color='var(--gold)';
+        amt=y(t.amount);
+        sub=`${when}`+(fee>0?` · 手续费 ${y(fee)}（我付）`:'');
+      }else{
+        title=`${t.from||'?'} 转入`; sign='+'; color='var(--gold)';
+        amt=y(t.amount);
+        sub=`${when}`+(fee>0?` · 手续费 ${y(fee)}（我付）`:'');
+      }
+    }else if(kind==='inc'){
+      title=t.note||'收入'; sign='+'; color='var(--green)';
+      amt=y(t.amount); sub=`${when}`+(t.category?` · ${t.category}`:'');
+    }else{
+      title=t.note||'支出'; sign='−'; color='var(--red)';
+      amt=y(t.amount); sub=`${when}`+(t.category?` · ${t.category}`:'');
+    }
+    return `<div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)" onclick="closeAcctDetail();editTx('${t.id}')">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${title}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">${sub}</div>
+      </div>
+      <div style="font-size:14px;font-weight:600;color:${color};white-space:nowrap">${sign}${amt}</div>
+    </div>`;
+  }).join(''):'<div style="text-align:center;color:var(--text3);font-size:13px;padding:24px 0">这个账户还没有流水</div>';
+
+  const old=document.getElementById('acctDetailModal');
+  if(old)old.remove();
+  const m=document.createElement('div');
+  m.className='modal show';m.id='acctDetailModal';
+  m.innerHTML=`<div class="sheet" style="max-height:86vh;overflow:auto">
+    <h3 style="display:flex;align-items:center;gap:8px">${name}${tag(f.rows.length+' 笔','var(--text2)')}</h3>
+    ${stat}
+    <div style="font-size:12px;color:var(--text2);margin:4px 0 2px">流水明细（转账不计入收支）</div>
+    <div style="margin-bottom:12px">${list}</div>
+    <button class="cancel-btn" onclick="closeAcctDetail()">关闭</button>
+  </div>`;
+  m.onclick=(e)=>{if(e.target===m)closeAcctDetail()};
+  document.body.appendChild(m);
+}
+function closeAcctDetail(){const m=document.getElementById('acctDetailModal');if(m)m.remove()}
 
 function switchView(v){cv=v;document.querySelectorAll('.tab-btn').forEach(t=>t.classList.remove('active'));document.querySelector(`.tab-btn:nth-child(${v==='tx'?1:v==='stats'?2:3})`).classList.add('active');document.getElementById('txList').style.display=v==='tx'?'block':'none';document.getElementById('statsView').classList.toggle('show',v==='stats');document.getElementById('acctsView').classList.toggle('show',v==='accts');document.getElementById('fab').style.display=v==='tx'?'block':'none';if(v==='stats')rss();if(v==='accts')rac()}
 
@@ -1091,6 +1209,7 @@ function openTxModal(id,pretype){
   if(pt==='transfer'){document.getElementById('txCatRow').style.display='none';document.getElementById('txTransferRow').style.display='flex';document.getElementById('txFeeRow').style.display='flex';if(t){document.getElementById('txFromBtn').textContent=t.from||'转出';document.getElementById('txToBtn').textContent=t.to||'转入';document.getElementById('txFee').value=t.fee||'';document.getElementById('txFeePayer').value=t.feePayer||'from'}}
   else{document.getElementById('txCatRow').style.display='flex';document.getElementById('txTransferRow').style.display='none';if(t){document.getElementById('txAcctBtn').textContent=t.account||'账户';document.getElementById('txAcctBtn').classList.add('selected');document.getElementById('txCatBtn').textContent=t.category||'分类';document.getElementById('txCatBtn').classList.add('selected')}}
   document.getElementById('txSubmit').textContent=id?'保存':pt==='transfer'?'确认转账':'确认'+(pt==='expense'?'支出':'收入');
+  if(pt==='transfer'){const ai=document.getElementById('txAmount');if(ai&&!ai._wxHooked){ai._wxHooked=1;ai.addEventListener('input',autoWxFee)}autoWxFee()}
   document.getElementById('txModal').classList.add('show');
 }
 /* ============ 还款（2026-11-07） ============
@@ -1274,11 +1393,37 @@ async function addCustomCat(){
   const name=n.trim(),list=gc(ct);if(!list.includes(name)){list.push(name);sc(ct,list)}
   sp(name);
 }
-function sp(v){if(pT==='account'){if(pS==='from')document.getElementById('txFromBtn').textContent=v;else if(pS==='to')document.getElementById('txToBtn').textContent=v;else{document.getElementById('txAcctBtn').textContent=v;document.getElementById('txAcctBtn').classList.add('selected')}}else{document.getElementById('txCatBtn').textContent=v;document.getElementById('txCatBtn').classList.add('selected');
+function sp(v){if(pT==='account'){if(pS==='from'){document.getElementById('txFromBtn').textContent=v;autoWxFee()}else if(pS==='to'){document.getElementById('txToBtn').textContent=v;autoWxFee()}else{document.getElementById('txAcctBtn').textContent=v;document.getElementById('txAcctBtn').classList.add('selected')}}else{document.getElementById('txCatBtn').textContent=v;document.getElementById('txCatBtn').classList.add('selected');
   const b=gb();if(b[v]&&b[v].recurring&&b[v].budget){document.getElementById('txAmount').value=b[v].budget;document.getElementById('txNote').value='固定·'+v}}
   closePicker()
 }
 function closePicker(){document.getElementById('pickerModal').classList.remove('show')}
+
+/* ══ 微信提现手续费自动算 ══
+   微信零钱提现到银行卡按 0.1% 收，最低 ¥0.10。
+   只在「转出账户」是微信时才自动填 —— 微信自己的零钱互转、扫码付款都不收费。
+   填进去的值用户随时可以手改覆盖。 */
+function isWxAcct(name){return /微信/.test(String(name||''))}
+/* 纯函数：微信提现手续费 = 金额 × 0.1%，最低 ¥0.10，四舍五入到分 */
+function wxFeeOf(amount){
+  const amt=Number(amount)||0;
+  if(amt<=0)return 0;
+  return Math.max(Math.round(amt*0.001*100)/100, 0.10);
+}
+function autoWxFee(){
+  const amtIn=document.getElementById('txAmount');
+  const feeIn=document.getElementById('txFee');
+  if(!amtIn||!feeIn)return;
+  const amt=parseFloat(amtIn.value)||0;
+  const from=(document.getElementById('txFromBtn')||{}).textContent||'';
+  const to=(document.getElementById('txToBtn')||{}).textContent||'';
+  // 只有「微信 → 别处」才收费；微信→微信、别人→微信 都不收
+  if(!isWxAcct(from)||isWxAcct(to)||amt<=0)return;
+  const fee=wxFeeOf(amt);
+  feeIn.value=fee.toFixed(2);
+  feeIn.dataset.auto='1';   // 标记：手改时清掉，避免反复覆盖用户输入
+}
+
 
 // ── Budget settings ──
 function openBudgetSettings(){
@@ -1597,12 +1742,39 @@ function importCSV(){
         }
         const lines=body.replace(/\r/g,'').split('\n').filter(l=>l.trim());
         if(lines.length<2)return ts('文件为空');
-        const d=atx(),ids=new Set(d.map(t=>t.id));let added=0,skipped=0;
+        const d=atx(),ids=new Set(d.map(t=>t.id));let added=0,skipped=0,tfNoAcct=0;
+        // ★ 转账修复：旧版这里写的是 c[1].includes('收入')?'income':'expense'，
+        //   于是「转账」被当成支出记进去（金额虚增、账户余额全错）。
+        //   v2 起识别转账并恢复 from/to/手续费。
         lines.slice(1).forEach(l=>{
           if(l.startsWith('#'))return;
           const c=parseCSVLine(l);const amt=parseFloat(c[2]);
           const date=c[0]&&c[0].match(/^\d{4}-\d{2}-\d{2}/)?c[0]:'';
-          if(c.length>=3&&date&&!isNaN(amt)&&amt>0){d.push({id:uid(),time:date+'T12:00:00',type:c[1].includes('收入')?'income':'expense',amount:amt,note:c[3]||'',account:c[4]||'',category:c[5]||''});added++}else skipped++;
+          if(!(c.length>=3&&date&&!isNaN(amt)&&amt>0)){skipped++;return}
+          const rawType=(c[1]||'').trim();
+          const isTransfer=/转账|transfer|转出|转入/i.test(rawType);
+          if(isTransfer){
+            // 转出/转入可能在 7、8 列（v2），也可能塞在 备注(4)/账户(5) 里（半新格式）
+            let from=(c[6]||'').trim(), to=(c[7]||'').trim();
+            if(!from||!to){
+              // 逐列单独匹配，绝不跨列拼接（否则「微信→银行卡」+备注「提现」会变成「银行卡提现」）
+              for(const f of [c[4],c[3],c[5]]){
+                const m=String(f||'').trim().match(/^([^\s,，→\-]{1,20})\s*(?:→|->|到|至)\s*([^\s,，→\-]{1,20})$/);
+                if(m){from=from||m[1];to=to||m[2];break}
+              }
+            }
+            const fee=parseFloat(c[8]);
+            const rec={id:uid(),time:date+'T12:00:00',type:'transfer',amount:amt,
+                       note:c[3]||'',from:from||'',to:to||''};
+            if(!isNaN(fee)&&fee>0){rec.fee=fee;rec.feePayer=(c[9]||'from').trim()==='to'?'to':'from'}
+            d.push(rec);
+            if(!rec.from||!rec.to)tfNoAcct++;   // 记下来，导完提示用户手工补
+            added++;
+          }else{
+            d.push({id:uid(),time:date+'T12:00:00',type:rawType.includes('收入')?'income':'expense',
+                    amount:amt,note:c[3]||'',account:c[4]||'',category:c[5]||''});
+            added++;
+          }
         });
         stx(d);
         // 同步账户结构（合并：新增缺失的，不覆盖已有金额）
@@ -1621,7 +1793,11 @@ function importCSV(){
           si(cur);
         }
         ra();
-        ts(added?'导入 '+added+' 条'+(skipped?'，跳过 '+skipped+' 行':''):'未导入：请确认格式为 日期,类型,金额,备注,账户,分类');
+        if(tfNoAcct>0){
+          ts('导入 '+added+' 条；其中 '+tfNoAcct+' 笔转账缺转出/转入账户，请点开补上');
+        }else{
+          ts(added?'导入 '+added+' 条'+(skipped?'，跳过 '+skipped+' 行':''):'未导入：请确认格式为 日期,类型,金额,备注,账户,分类,转出,转入,手续费,付费方');
+        }
       }catch(e){ts('格式错误')}
     };
     r.readAsText(f);
@@ -1629,12 +1805,31 @@ function importCSV(){
   i.click()
 }
 function parseCSVLine(line){const r=[];let cur='',inQ=false;for(let i=0;i<line.length;i++){const ch=line[i];if(inQ){if(ch==='"'){if(line[i+1]==='"'){cur+='"';i++}else inQ=false}else cur+=ch}else{if(ch===','){r.push(cur.trim());cur=''}else if(ch==='"')inQ=true;else cur+=ch}}r.push(cur.trim());return r}
+/* ══ CSV 结构 v2（2026-11-13）══
+   日期,类型,金额,备注,账户,分类,转出,转入,手续费,付费方
+   - 支出/收入：只用前 6 列，后 4 列留空
+   - 转账：类型写「转账」，账户/分类留空，转出/转入/手续费/付费方填
+   读取时兼容旧 6 列格式（转账信息缺失的旧记录仍按支出/收入处理——那部分信息当年就没存）。 */
+function csvTxType(t){
+  return t.type==='transfer'?'转账':t.type==='income'?'收入':'支出';
+}
+function csvRow(t){
+  const base=[t.time.slice(0,10),csvTxType(t),Number(t.amount||0).toFixed(2),t.note||'',
+              t.type==='transfer'?'':(t.account||''),t.type==='transfer'?'':(t.category||'')];
+  if(t.type!=='transfer')return base.join(',');
+  const from=t.from||'',to=t.to||'',fee=Number(t.fee||0),fp=t.feePayer||'from';
+  return base.concat([from,to,fee>0?fee.toFixed(2):'',fee>0?(fp==='to'?'to':'from'):'']).join(',');
+}
+function csvHeader(){return '日期,类型,金额,备注,账户,分类,转出,转入,手续费,付费方'}
+function buildCSV(tx){
+  const rows=tx.map(csvRow);
+  const accLines='#CASH_ACCOUNTS#\n'+ga().join(',')+'\n#INVEST_ACCOUNTS#\n'
+    +gi().map(a=>[a.name,a.amount||0,a.month||'',a.ours!==false?'true':'false'].join(',')).join('\n');
+  return '\ufeff'+[csvHeader(),...rows,accLines].join('\n');
+}
 function exportCSV(){
   const tx=atx();if(!tx.length)return ts('无数据');
-  const h='日期,类型,金额,备注,账户,分类';
-  const rows=tx.map(t=>[t.time.slice(0,10),t.type==='expense'?'支出':'收入',t.amount.toFixed(2),t.note||'',t.account||'',t.category||''].join(','));
-  const accLines='#CASH_ACCOUNTS#\n'+ga().join(',')+'\n#INVEST_ACCOUNTS#\n'+gi().map(a=>[a.name,a.amount||0,a.month||'',a.ours!==false?'true':'false'].join(',')).join('\n');
-  const csv='\ufeff'+[h,...rows,accLines].join('\n');
+  const csv=buildCSV(tx);
   const fn='记账_'+cm+'.csv';
   if(window.MinisBridge && typeof window.MinisBridge.saveText==='function'){
     window.MinisBridge.saveText(fn,csv);ts('已保存到 下载/'+fn);
@@ -1655,9 +1850,7 @@ function exportCSVRange(){
   if(!s||!e)return ts('请选择起止日期');
   const tx=atx().filter(t=>t.time.slice(0,10)>=s&&t.time.slice(0,10)<=e);
   if(!tx.length)return ts('该时间段无数据');
-  const h='日期,类型,金额,备注,账户,分类',rows=tx.map(t=>[t.time.slice(0,10),t.type==='expense'?'支出':'收入',t.amount.toFixed(2),t.note||'',t.account||'',t.category||''].join(','));
-  const accLines='#CASH_ACCOUNTS#\n'+ga().join(',')+'\n#INVEST_ACCOUNTS#\n'+gi().map(a=>[a.name,a.amount||0,a.month||'',a.ours!==false?'true':'false'].join(',')).join('\n');
-  const csv='\ufeff'+[h,...rows,accLines].join('\n');
+  const csv=buildCSV(tx);
   const fn=`记账_${s}_${e}.csv`;
   window.MinisBridge && typeof window.MinisBridge.saveText==='function'
     ? (window.MinisBridge.saveText(fn,csv),ts(`已保存到 下载/${fn}`))

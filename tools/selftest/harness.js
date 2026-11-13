@@ -74,7 +74,8 @@ const exportList=[
  'safeRead','safeWrite','snapshotBeforeWrite','listSnapshots','migrateTx','SCHEMA_VERSION','SNAP_PREFIX','restoreSnapshot',
  'parseNotifFull','findAmounts','isPaymentSegment','singleParse','looksLikePaymentText',
  'mergePool','isRechargeItem','isBankItem','isAlreadyBooked','getCashBalances','reconDerived',
- 'entryKey','dismissKey','makeTx','uid','atx','ga','gi','updateInvPlanHint','stx'
+ 'entryKey','dismissKey','makeTx','uid','atx','ga','gi','updateInvPlanHint','stx',
+ 'acctFlow','buildCSV','wxFeeOf','isWxAcct'
 ];
 let wrapped;
 try{

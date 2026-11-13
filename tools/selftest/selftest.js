@@ -12,6 +12,7 @@ const runs = [
   ['回归测试（本轮修复的3个bug + 防误吞）', 'regress.js'],
   ['数据安全网（坏数据隔离/快照/迁移）', 'datasafety_test.js'],
   ['金标准快照（任何意外行为变化都会红）', 'golden_test.js'],
+  ['CSV/账户对账/手续费/资产拆分', 'csv_acct_test.js'],
 ];
 
 let failed = 0;
