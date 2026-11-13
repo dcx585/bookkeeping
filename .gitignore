@@ -1,1 +1,5 @@
 *.bak.*
+*.db
+*.sqlite
+import_backup.json
+imported_tx.json
