@@ -55,6 +55,8 @@ node tools/parse_parity.js app.html .github/workflows/build-apk.yml || FAIL=1
 
 note "6/7 菜单/按钮指纹（golden）—— 改了 A 弄坏 B 的按钮"
 COMPARE=1 sh tools/menu_snapshot.sh --dump || FAIL=1
+note "   内联事件引用完整性（onclick 指向的函数必须存在）"
+node tools/check_handlers.js || FAIL=1
 
 note "7/7 数据完整性工具自检 + 真实数据文件"
 sh tools/jbcheck.sh --self || FAIL=1

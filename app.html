@@ -1197,6 +1197,7 @@ function closeAcctDetail(){const m=document.getElementById('acctDetailModal');if
    漏记一笔，账面和真实就对不上。这里填一次真实余额，
    差额自动补成一笔「余额矫正」记录，账面立刻对齐。
    正差 = 有收入漏记；负差 = 有支出漏记。 */
+function switchView(v){cv=v;document.querySelectorAll('.tab-btn').forEach(t=>t.classList.remove('active'));document.querySelector(`.tab-btn:nth-child(${v==='tx'?1:v==='stats'?2:3})`).classList.add('active');document.getElementById('txList').style.display=v==='tx'?'block':'none';document.getElementById('statsView').classList.toggle('show',v==='stats');document.getElementById('acctsView').classList.toggle('show',v==='accts');document.getElementById('fab').style.display=v==='tx'?'block':'none';if(v==='stats')rss();if(v==='accts')rac()}
 // ── Transaction CRUD ──
 /* 记账时刻：记今天 → 用当前时钟；补记过去某天 → 只留日期（12:00:00 当"不知道几点"的哨兵） */
 function txClock(dateStr){
