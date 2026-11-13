@@ -22,6 +22,7 @@ openImportNotify
 openRecon
 openBudgetSettings
 openParserDiag
+open
 openAutoPanel
 backupData
 openCalc
@@ -110,3 +111,11 @@ purgeDismissed
 openNotifCfg
 setParseV2
 runParserDiag
+close
+test
+openManual
+back
+saveProvider
+back
+runManual
+-()
