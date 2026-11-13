@@ -1476,6 +1476,37 @@ jobs:
         run: |
           # 从 GitHub Secrets 还原 release keystore；密码通过 env 传入(避免shell解析特殊字符)
           echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+
+          # 守卫：空 keystore 会让后面报一个看不懂的 ASN.1 错误
+          #   （0 字节文件首字节读成 0xFF → "Tag number over 30 is not supported"）
+          # 在这里直接判定，给出明确原因。
+          if [ ! -s release.keystore ]; then
+            echo "::error::release.keystore 是空的（0 字节）"
+            echo "原因：Secret RELEASE_KEYSTORE_BASE64 不存在或为空"
+            echo "修：仓库 Settings → Secrets and variables → Actions → 添加该 Secret"
+            echo "    值 = keystore 的 base64（base64 -w0 xxx.keystore）"
+            exit 1
+          fi
+
+          # 首字节检查：合法的 PKCS12 是 0x30，JKS 是 0xfe
+          # 0x1f/0x3f/0x5f/0x7f/0x9f/0xbf/0xdf/0xff 都会被 JDK 拒掉
+          FIRST=$(od -An -tx1 -N1 release.keystore | tr -d ' \n')
+          echo "keystore 首字节: 0x$FIRST"
+          case "$FIRST" in
+            30*) ;;                                  # PKCS12，正常
+            fe*) ;;                                  # JKS，正常
+            *)
+              echo "::error::release.keystore 首字节 0x$FIRST 不是合法的 keystore 格式"
+              echo "合法值：0x30（PKCS12）或 0xfe（JKS）"
+              exit 1
+              ;;
+          esac
+
+          if [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::Secret RELEASE_KEYSTORE_PASSWORD 为空"
+            exit 1
+          fi
+
           echo "KEYSTORE_FILE=$GITHUB_WORKSPACE/release.keystore" >> "$GITHUB_ENV"
           echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
           ls -la release.keystore
