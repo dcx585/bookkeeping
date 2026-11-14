@@ -19,6 +19,24 @@ HOOK_MARK = '/* [V2-HOOK] */'
 
 html = APP.read_text(encoding='utf-8')
 
+# ---------- 0. 守卫：旧块里不许有「不是 js/parser_v2.js 定义的函数」 ----------
+# ★ 2026-11-15 事故：setParseV2 / openParserDiag / runParserDiag 三个手写函数
+#   曾放在 [V2-PARSER-BEGIN]…[V2-PARSER-END] 之间。整块替换时被一起删掉，
+#   结果是「解析诊断」变死按钮、默认引擎静默退回 v1，而门禁当时只看语法。
+#   现在：手写代码一律放块外；这里再兜一层——块内出现生成器不认识的函数就拒绝执行。
+_src_all = V2.read_text(encoding='utf-8')
+m_old = re.search(re.escape(MARK_BEGIN) + r'[\s\S]*?' + re.escape(MARK_END), html)
+if m_old:
+    gen_fns = set(re.findall(r'^\s*function\s+(\w+)', _src_all, re.M))
+    old_fns = set(re.findall(r'^\s*function\s+(\w+)', m_old.group(0), re.M))
+    intruders = sorted(old_fns - gen_fns)
+    if intruders:
+        print('ERROR: v2 自动生成块里有手写函数，整块替换会把它们删掉：', file=sys.stderr)
+        for f in intruders:
+            print('   · ' + f, file=sys.stderr)
+        print('   → 请把这些函数移到 [V2-PARSER-END] 之后，然后再跑。', file=sys.stderr)
+        sys.exit(1)
+
 # ---------- 1. 清理旧的 v2 注入块（幂等） ----------
 html = re.sub(
     re.escape(MARK_BEGIN) + r'[\s\S]*?' + re.escape(MARK_END) + r'\n?',
@@ -38,8 +56,9 @@ block = f"""
 //   其许可为 MIT + 附加「禁止原样转售」，明确允许衍生开发自由定价/闭源/收费。
 //   本项目只借鉴思路，代码为独立 JavaScript 实现，未复制其源码。
 //   完整声明见仓库根目录 NOTICE.md。
-// 开关：window.PARSE_V2 = true 时启用。关掉即回到旧逻辑（旧代码完整保留）
-window.PARSE_V2 = window.PARSE_V2 || false;
+// 开关：window.PARSE_V2 决定走 v2 还是 v1。
+// ★ 开关的初始化、切换函数、诊断面板都在本块【之外】（[V2-PARSER-END] 之后），
+//   因为本块会被整块替换 —— 放进来的手写代码会被删掉。
 {src}
 {MARK_END}
 """
@@ -86,4 +105,4 @@ APP.write_text(html, encoding='utf-8')
 print(f'OK: app.html 已更新 ({len(html)} chars)')
 print(f'   v2 代码块: {"已注入" if MARK_BEGIN in html else "失败"}')
 print(f'   分流钩子: {"已注入" if HOOK_MARK in html else "失败"}')
-print(f'   默认开关: window.PARSE_V2 = false（需手动开启）')
+print(f'   默认开关: 由 [V2-PARSER-END] 之后的手写段决定（默认开启，可持久保存关闭）')
