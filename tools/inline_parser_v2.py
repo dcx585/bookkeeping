@@ -61,16 +61,20 @@ hook_code = f"""{HOOK_MARK}
           src: n.app || '',
           time: b.time || t0,
           finger: payFingerprint(b.note || '', b.account, b.amount, b.time || t0),
-          special: null,
-          needConfirm: !!b.needConfirm,
           _v2: true,
-        }}));
+        }}, autoBookGate(b)));
       }}
     }} catch (e) {{ console.warn('[v2] 解析失败，回退旧逻辑', e); }}
   }}
 """
 
-if HOOK_MARK not in html:
+if HOOK_MARK in html:
+    # ★ 幂等时也要【刷新】钩子内容：只判断"标记在不在"会导致
+    #   生成器里的 hook 改了、app.html 里还是旧的，两边永久不同步。
+    html = re.sub(
+        re.escape(HOOK_MARK) + r'[\s\S]*?(?=\n  // 返回数组：一条通知可能合了多笔支付)',
+        hook_code.rstrip(), html, count=1)
+else:
     html = html.replace(anchor, anchor + '\n' + hook_code, 1)
 
 APP.write_text(html, encoding='utf-8')

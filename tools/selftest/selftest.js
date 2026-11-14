@@ -13,6 +13,7 @@ const runs = [
   ['数据安全网（坏数据隔离/快照/迁移）', 'datasafety_test.js'],
   ['金标准快照（任何意外行为变化都会红）', 'golden_test.js'],
   ['CSV/账户对账/手续费/资产拆分', 'csv_acct_test.js'],
+  ['自动入账统一闸门（v1/v2 一致）', 'autobook_test.js'],
 ];
 
 let failed = 0;

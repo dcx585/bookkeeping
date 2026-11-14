@@ -75,7 +75,8 @@ const exportList=[
  'parseNotifFull','findAmounts','isPaymentSegment','singleParse','looksLikePaymentText',
  'mergePool','isRechargeItem','isBankItem','isAlreadyBooked','getCashBalances','reconDerived',
  'entryKey','dismissKey','makeTx','uid','atx','ga','gi','updateInvPlanHint','stx',
- 'acctFlow','buildCSV','wxFeeOf','isWxAcct','reconNum'
+ 'acctFlow','buildCSV','wxFeeOf','isWxAcct','reconNum',
+ 'autoBookGate'
 ];
 let wrapped;
 try{

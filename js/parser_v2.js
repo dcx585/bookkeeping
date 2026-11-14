@@ -61,8 +61,16 @@ function firstAmount(re, text) {
 function extractAmount(source, text) {
   switch (source) {
     case 'WECHAT':
-      // 微信只认 ¥ —— 它的通知必定带这个符号（"已支付¥4.85"）
-      return { cents: firstAmount(RE_SYMBOL_FIRST, text), rule: 'wx.symbol' };
+      // 微信通知【并不必然】带 ¥（「已支付15.80」这种原文只给裸数字），
+      // 所以 ¥ 优先但要留回退，否则整条返回 null。
+      // 注意：这里【不】退回通用裸数字锚点 —— 宁可放弃也不猜。
+      {
+        let c = firstAmount(RE_SYMBOL_FIRST, text);
+        if (c != null) return { cents: c, rule: 'wx.symbol' };
+        c = firstAmount(RE_YUAN_LAST, text);
+        if (c != null) return { cents: c, rule: 'wx.yuan' };
+        return { cents: firstAmount(RE_PAID_NEAR, text), rule: 'wx.labeled' };
+      }
 
     case 'ALIPAY':
       // 支付宝认「元」—— 标准句式"你有一笔X元的支出"
@@ -337,7 +345,13 @@ function findAllAnchoredAmounts(text, source) {
 
   switch (source) {
     case 'WECHAT':
+      // ★ 2026-11-15：微信通知【并不必然】带 ¥。
+      //   实测「微信支付凭证 已支付15.80」这类原文只给了裸数字，
+      //   只认 ¥ 会整条返回 [] → v2 静默回退 v1，用户感知不到 v2 在跑。
+      //   顺序不变：¥ 优先（最可信），没有才退回「元」，再退回通用锚点。
       collect(RE_SYMBOL_FIRST, 'wx.symbol');
+      if (!out.length) collect(RE_YUAN_LAST, 'wx.yuan');
+      if (!out.length) collect(RE_PAID_NEAR, 'wx.labeled');
       break;
     case 'ALIPAY':
       collect(RE_YUAN_LAST, 'alipay.yuan');

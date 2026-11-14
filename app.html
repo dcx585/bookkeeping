@@ -2884,98 +2884,26 @@ function looksLikePaymentText(s){
   const payWord=/支付|消费|支出|收入|到账|扣款|退款|退回|转账|收款|入账|交易|付款|还款|存入|转入|转出|缴费|充值|银行卡|储蓄卡|信用卡|借记卡|花呗|借呗|白条|尾号|卡号|实付|余额|人民币/;
   return payWord.test(s);
 }
+// ── 自动入账统一闸门（v1/v2 两条解析路径必须共用，否则开关一换行为就变） ──
+// 规则：金额≤AUTO_THRESHOLD 且 非专项资金 且 账户是"日常兜底账户"(微信/银行卡) → 自动入账
+//       其余一律进待确认框，由用户点头后再 ack。
+// ★ 2026-11-15：v2 分支原先只透传 parseNoticeV2 的 needConfirm，
+//   完全绕过阈值与账户判定 —— 开 v2（默认）时大额会被静默自动记账、
+//   银行卡小额反而卡在待确认、且专项资金识别失效。统一到这里。
+function autoBookGate(b){
+  const segText = (b && b.note) || '';
+  const special = (b && b.type === 'expense') ? SPECIAL_SPEND.find(re => re.test(segText)) : null;
+  const dailyAccts = ['微信','银行卡'];
+  const isDailyAcct = !!(b && b.account) && dailyAccts.indexOf(b.account) >= 0;
+  const amount = Number((b && b.amount) || 0);
+  const needConfirm = !!special || amount > AUTO_THRESHOLD || !(b && b.account) || !isDailyAcct;
+  return { special: special ? special.toString() : null, needConfirm: needConfirm };
+}
+
 // ===== [V2-PARSER-BEGIN] auto-generated, do not edit =====
 // 解析器 v2 —— 按来源锚点提取金额（借鉴 blue-whale-keeper 的踩坑经验）
-// 开关：可从 App 界面切换，设置持久保存。
-//   true  → 走新解析器（按来源锚点提金额）
-//   false → 回到旧逻辑（旧代码完整保留，随时可退）
-// 默认开启；若新解析器出错会自动回退旧逻辑，不会卡死记账。
-// 用户在「更多 → 解析诊断」里可以随时关掉（持久保存到 localStorage）。
-// ★ 注意：外部（测试/调试）已显式设置过 window.PARSE_V2 时，尊重外部值。
-if (typeof window.PARSE_V2 !== 'boolean') {
-  window.PARSE_V2 = true;
-  try {
-    const _v2saved = safeRead('parse_v2', null);
-    if (_v2saved === false) window.PARSE_V2 = false;
-  } catch (e) { /* 读不到设置就用默认值 true */ }
-}
-
-/** 切换解析引擎，供设置界面调用 */
-function setParseV2(on) {
-  window.PARSE_V2 = !!on;
-  try { safeWrite(() => localStorage.setItem('parse_v2', JSON.stringify(!!on))); } catch (e) {}
-  try { ts(on ? '✅ 已切到新解析引擎（v2）' : '↩️ 已切回旧解析引擎'); } catch (e) {}
-  return window.PARSE_V2;
-}
-
-/**
- * 解析诊断面板。
- *
- * 解决一个具体问题：「收到了但没记上」和「压根没收到」看着一模一样，
- * 但处理方式完全不同。这里能贴任一条通知原文，立刻告诉你：
- *   识别成哪家来源 / 取到多少金额 / 判成什么方向 / 还是没记上的原因
- */
-function openParserDiag() {
-  const on = !!window.PARSE_V2;
-  const status = on
-    ? '<b style="color:#2a7">新解析引擎（v2）已开启</b>'
-    : '<b style="color:#c55">旧解析引擎（v1）运行中</b>';
-
-  document.getElementById('pickerTitle').textContent = '解析诊断';
-  document.getElementById('pickerList').innerHTML = `
-    <div style="font-size:13px;line-height:1.6;text-align:left;padding:0 4px">
-      <div style="margin-bottom:10px">当前：${status}</div>
-      <button class="submit" style="width:100%;margin-bottom:14px"
-        onclick="setParseV2(${!on});openParserDiag();">
-        ${on ? '↩️ 切回旧引擎' : '✅ 启用新引擎'}
-      </button>
-      <div style="font-size:12px;color:var(--text3);margin-bottom:6px">
-        粘贴一条通知/短信原文，看看它为什么没记上：
-      </div>
-      <textarea id="diagInput" rows="4" style="width:100%;box-sizing:border-box;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--text)"
-        placeholder="例：微信支付：已支付¥4.85"></textarea>
-      <button class="submit" style="width:100%;margin:8px 0"
-        onclick="runParserDiag()">开始诊断</button>
-      <div id="diagOut" style="font-size:13px;line-height:1.7"></div>
-    </div>`;
-  document.getElementById('pickerModal').style.display = 'flex';
-}
-
-function runParserDiag() {
-  const el = document.getElementById('diagInput');
-  const out = document.getElementById('diagOut');
-  const raw = (el && el.value || '').trim();
-  if (!raw) { out.innerHTML = '<span style="color:#c55">请先粘贴一条通知原文</span>'; return; }
-
-  if (typeof diagnoseNotice !== 'function') {
-    out.innerHTML = '<span style="color:#c55">诊断函数未加载</span>';
-    return;
-  }
-
-  let d;
-  try {
-    d = diagnoseNotice({ title: raw, text: '', app: '' });
-  } catch (e) {
-    out.innerHTML = '<span style="color:#c55">诊断出错：' + e.message + '</span>';
-    return;
-  }
-
-  const srcName = { WECHAT: '微信', ALIPAY: '支付宝', BANK: '银行', TAOBAO: '淘宝', JD: '京东', PDD: '拼多多', OTHER: '其他' }[d.source] || d.source;
-
-  let html = '<div style="background:var(--card);border-radius:8px;padding:10px;margin-bottom:8px">';
-  html += '来源：<b>' + srcName + '</b><br>';
-  if (d.cents) html += '金额：<b>' + (d.cents / 100).toFixed(2) + ' 元</b><br>';
-  if (d.type) html += '方向：<b>' + (d.type === 'income' ? '收入' : '支出') + '</b><br>';
-  html += '</div>';
-
-  if (d.ok) {
-    html += '<div style="color:#2a7">✅ 这条能正常记账</div>';
-  } else {
-    html += '<div style="color:#c55">❌ 不会记账</div>';
-    html += '<div style="font-size:12px;color:var(--text2);margin-top:4px">原因：' + d.reason + '</div>';
-  }
-  out.innerHTML = html;
-}
+// 开关：window.PARSE_V2 = true 时启用。关掉即回到旧逻辑（旧代码完整保留）
+window.PARSE_V2 = window.PARSE_V2 || false;
 /* ============================================================
  * 通知解析 v2 —— 按来源锚点提取（借鉴 blue-whale-keeper）
  *
@@ -3039,8 +2967,16 @@ function firstAmount(re, text) {
 function extractAmount(source, text) {
   switch (source) {
     case 'WECHAT':
-      // 微信只认 ¥ —— 它的通知必定带这个符号（"已支付¥4.85"）
-      return { cents: firstAmount(RE_SYMBOL_FIRST, text), rule: 'wx.symbol' };
+      // 微信通知【并不必然】带 ¥（「已支付15.80」这种原文只给裸数字），
+      // 所以 ¥ 优先但要留回退，否则整条返回 null。
+      // 注意：这里【不】退回通用裸数字锚点 —— 宁可放弃也不猜。
+      {
+        let c = firstAmount(RE_SYMBOL_FIRST, text);
+        if (c != null) return { cents: c, rule: 'wx.symbol' };
+        c = firstAmount(RE_YUAN_LAST, text);
+        if (c != null) return { cents: c, rule: 'wx.yuan' };
+        return { cents: firstAmount(RE_PAID_NEAR, text), rule: 'wx.labeled' };
+      }
 
     case 'ALIPAY':
       // 支付宝认「元」—— 标准句式"你有一笔X元的支出"
@@ -3315,7 +3251,13 @@ function findAllAnchoredAmounts(text, source) {
 
   switch (source) {
     case 'WECHAT':
+      // ★ 2026-11-15：微信通知【并不必然】带 ¥。
+      //   实测「微信支付凭证 已支付15.80」这类原文只给了裸数字，
+      //   只认 ¥ 会整条返回 [] → v2 静默回退 v1，用户感知不到 v2 在跑。
+      //   顺序不变：¥ 优先（最可信），没有才退回「元」，再退回通用锚点。
       collect(RE_SYMBOL_FIRST, 'wx.symbol');
+      if (!out.length) collect(RE_YUAN_LAST, 'wx.yuan');
+      if (!out.length) collect(RE_PAID_NEAR, 'wx.labeled');
       break;
     case 'ALIPAY':
       collect(RE_YUAN_LAST, 'alipay.yuan');
@@ -3404,14 +3346,11 @@ function parseNotifFull(n){
           src: n.app || '',
           time: b.time || t0,
           finger: payFingerprint(b.note || '', b.account, b.amount, b.time || t0),
-          special: null,
-          needConfirm: !!b.needConfirm,
           _v2: true,
-        }));
+        }, autoBookGate(b)));
       }
     } catch (e) { console.warn('[v2] 解析失败，回退旧逻辑', e); }
   }
-
   // 返回数组：一条通知可能合了多笔支付（安卓把2-3条合并成一条），所以输出多笔
   const time = n.time||Date.now();
   const raw=(n.title||'')+' '+(n.text||'')+' '+(n.app||'');
@@ -3419,17 +3358,10 @@ function parseNotifFull(n){
   const items = parseNotifMulti(n);
   return items.map((b,i)=>{
     // 专项资金判定针对"每一笔自身"的文本，且只针对支出(收入如退款/工资/红包应正常记账，账户不敏感)
-    const segText=b.note||'';
-    const special = (b.type==='expense') ? SPECIAL_SPEND.find(re=>re.test(segText)) : null;
     const finger = payFingerprint(b.note||raw, b.account, b.amount, time+i*1000);
-    // 自动入账条件：金额≤阈值 且 非专项资金 且 账户是"日常兜底账户"(微信/银行卡)。
-    const dailyAccts = ['微信','银行卡'];
-    const isDailyAcct = b.account && dailyAccts.includes(b.account);
-    const needConfirm = !!special || b.amount>AUTO_THRESHOLD || !b.account || !isDailyAcct;
     return Object.assign({}, b,{
-      src:n.app||'', time:time, finger:finger,
-      special:special?special.toString():null, needConfirm:needConfirm
-    });
+      src:n.app||'', time:time, finger:finger
+    }, autoBookGate(b));
   });
 }
 
@@ -3754,7 +3686,7 @@ async function autoBookkeep(){
   try{
   const q=await readPendingQueue();
   const tx=atx();
-  let autoN=0, confirmItems=[], autoAck=[], autoLog=[];
+  let autoN=0, confirmItems=[], autoAck=[], staleAck=[], autoLog=[];
   const seen=new Set();
   for(const n of q){
     const nid=n.id||('q_'+Date.now()+'_'+Math.random().toString(36).slice(2,6));
@@ -3770,23 +3702,26 @@ async function autoBookkeep(){
       }catch(e){}
       autoAck.push(nid); continue;
     }
-    let anyAuto=false, anyConfirm=false;
+    let anyAuto=false, anyConfirm=false, anyFresh=false;
     for(const e of es){
       if(seen.has(e.finger)||isAlreadyBooked(e)){ anyAuto=true; continue; }
       seen.add(e.finger);
       if(!e.needConfirm){
-        tx.push(makeTx(e,{auto:true})); autoN++; anyAuto=true;   // 打「自动」标记，便于在流水里辨认
+        tx.push(makeTx(e,{auto:true})); autoN++; anyAuto=true; anyFresh=true;   // 打「自动」标记，便于在流水里辨认
         // 【关键】自动入账也必须留痕：否则用户打开框是空的，
         // 会误以为"根本没识别到"，而其实早就记进去了。
         autoLog.push({ts:Date.now(), amount:e.amount, type:e.type,
                       note:e.note||'', account:e.account||'', category:e.category||'其他'});
       } else {
-        confirmItems.push({pid:nid, entry:e}); anyConfirm=true;
+        confirmItems.push({pid:nid, entry:e}); anyConfirm=true; anyFresh=true;
       }
     }
     // ack原则：仅当该通知的所有子笔都不需要确认时才立即ack；
     // 有确认子笔的，等确认完成后由 confirm 函数统一 ack（finishAutoConfirms）
-    if(anyAuto && !anyConfirm) autoAck.push(nid);
+    // 已经记过账/已在待确认里的重复条目单独成一批先 ack：它们只是队列残留，
+    // 先清掉才不会再弹；新处理的条目放后一批，便于日志/排查看清"这次到底 ack 了谁"。
+    if(anyAuto && !anyConfirm && !anyFresh) staleAck.push(nid);
+    else if(anyAuto && !anyConfirm) autoAck.push(nid);
     else if(!anyAuto && !anyConfirm && es.length) autoAck.push(nid);
   }
   stx(tx);
@@ -3803,6 +3738,7 @@ async function autoBookkeep(){
       pendingAutoCount=0;
     },400);
   }
+  ackPending(staleAck);
   ackPending(autoAck);
   } finally { autoRunning=false; }
 }
