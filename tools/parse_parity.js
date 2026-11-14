@@ -1,4 +1,4 @@
-// parse_parity.js <app.html> <build-apk.yml>
+// parse_parity.js <app.html> <NotificationReaderService.java>
 // ─────────────────────────────────────────────────────────────
 // 解析口径一致性检查 —— 专治「Java 粗筛 与 JS 精判 规则不一致」
 //
@@ -13,11 +13,11 @@
 //   （Java 可以宽松，但不能把 JS 能认的丢掉 → 那才是静默漏账）
 // ─────────────────────────────────────────────────────────────
 const fs = require('fs');
-const [htmlPath, ymlPath] = process.argv.slice(2);
-if (!htmlPath || !ymlPath) { console.error('用法: node parse_parity.js <app.html> <build-apk.yml>'); process.exit(2); }
+const [htmlPath, javaPath] = process.argv.slice(2);
+if (!htmlPath || !javaPath) { console.error('用法: node parse_parity.js <app.html> <NotificationReaderService.java>'); process.exit(2); }
 
 const html = fs.readFileSync(htmlPath, 'utf8');
-const yml  = fs.readFileSync(ymlPath, 'utf8');
+const java = fs.readFileSync(javaPath, "utf8");
 
 // ── 从 app.html 抽出 JS 判定链路 ──
 // 用 Node 沙箱跑真身（复用 harness）
@@ -33,9 +33,9 @@ if (!X || !X.looksLikePaymentText || !X.parseNotifFull) {
   console.error('⚠ harness 未导出判定函数，跳过'); process.exit(0);
 }
 
-// ── 从 build-apk.yml 抽出 Java 的金额与支付词正则，用 JS 等价复现 ──
-const amtBlk = /boolean hasAmt = Pattern\.compile\(([\s\S]*?)\)\.matcher\(s\)\.find\(\);/.exec(yml);
-if (!amtBlk) { console.error('❌ 在 build-apk.yml 里找不到 hasAmt 正则 —— 可能被改名，本检查已失效'); process.exit(1); }
+// ── 从 NotificationReaderService.java 抽出 Java 的金额与支付词正则，用 JS 等价复现 ──
+const amtBlk = /boolean hasAmt = Pattern\.compile\(([\s\S]*?)\)\.matcher\(s\)\.find\(\);/.exec(java);
+if (!amtBlk) { console.error('❌ 在 NotificationReaderService.java 里找不到 hasAmt 正则 —— 可能被改名，本检查已失效'); process.exit(1); }
 // Java 里是 "..." + "..." 拼接。只取【字符串字面量】里的内容，忽略注释与拼接符
 const literals = [];
 const litRe = /"((?:[^"\\]|\\.)*)"/g;
@@ -50,7 +50,7 @@ try { javaAmt = new RegExp(javaAmtSrc); }
 catch (e) { console.error('❌ Java 金额正则无法解析成 JS 正则：' + e.message + '\n   源: ' + javaAmtSrc); process.exit(1); }
 
 // 支付词正则：从 looksLikePayment 里那条 return Pattern.compile("...") 抓
-const payRe = /return\s+Pattern\.compile\(\s*"((?:[^"\\]|\\.)*)"\s*\)\s*\.matcher\(s\)\s*\.find\(\);/.exec(yml);
+const payRe = /return\s+Pattern\.compile\(\s*"((?:[^"\\]|\\.)*)"\s*\)\s*\.matcher\(s\)\s*\.find\(\);/.exec(java);
 let javaPay = null;
 if (payRe) { try { javaPay = new RegExp(payRe[1].replace(/\\\\/g, '\\')); } catch (e) {} }
 

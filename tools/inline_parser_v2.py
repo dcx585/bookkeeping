@@ -32,7 +32,12 @@ src = re.sub(r'// -{5,} 导出 -{5,}[\s\S]*$', '', src).strip()
 # 去掉模块导出（内联后不需要）
 block = f"""
 {MARK_BEGIN}
-// 解析器 v2 —— 按来源锚点提取金额（借鉴 blue-whale-keeper 的踩坑经验）
+// 解析器 v2 —— 按来源锚点提取金额
+// ★ 来源与条款：思路借鉴自 blue-whale-keeper（蓝色大肥鱼管家，
+//   https://github.com/a2244921700-code/blue-whale-keeper）。
+//   其许可为 MIT + 附加「禁止原样转售」，明确允许衍生开发自由定价/闭源/收费。
+//   本项目只借鉴思路，代码为独立 JavaScript 实现，未复制其源码。
+//   完整声明见仓库根目录 NOTICE.md。
 // 开关：window.PARSE_V2 = true 时启用。关掉即回到旧逻辑（旧代码完整保留）
 window.PARSE_V2 = window.PARSE_V2 || false;
 {src}

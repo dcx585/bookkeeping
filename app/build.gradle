@@ -1,0 +1,39 @@
+plugins {
+    id 'com.android.application'
+}
+android {
+    namespace 'com.minis.bookkeeping'
+    compileSdk 34
+
+    // 版本号由 CI 环境变量注入；本地构建缺省为 0.0.0-dev。
+    // ★ 不在 CI 里再用 sed 替换占位符 —— 那会让仓库里的这份文件与真正构建的文件不一致。
+    def envVerName = System.getenv("VERSION_NAME")
+    def envVerCode = System.getenv("VERSION_CODE")
+
+    defaultConfig {
+        applicationId "com.minis.bookkeeping"
+        minSdk 26
+        targetSdk 34
+        versionCode envVerCode ? envVerCode.toInteger() : 1
+        versionName envVerName ?: "0.0.0-dev"
+    }
+    signingConfigs {
+        release {
+            storeFile file(System.getenv("KEYSTORE_FILE") ?: project.rootProject.file("missing.keystore"))
+            storePassword System.getenv("KEYSTORE_PASSWORD")
+            keyAlias "bookkeeping"
+            keyPassword System.getenv("KEYSTORE_PASSWORD")
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        encoding "UTF-8"
+    }
+}

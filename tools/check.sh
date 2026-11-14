@@ -35,23 +35,17 @@ note "3/7 逻辑 + 回归 + 金标准快照测试"
 ( cd tools/selftest && node selftest.js ) || FAIL=1
 ( cd tools/selftest && node golden_test.js ) || FAIL=1
 
-note "4/7 Java 结构（heredoc 抽出的源码，花括号/字符串/方法名）"
+note "4/7 原生源码结构（Java 花括号/包名、构建配置）"
+# ★ 2026-11-15：Java 源码已从 workflow heredoc 搬进仓库 app/src/main/java。
+#   heredoc_check 只作遗留兜底，真正的检查在 java_check.js。
+node tools/java_check.js || FAIL=1
 node tools/heredoc_check.js .github/workflows/build-apk.yml || FAIL=1
 ( cd tools/selftest && javac -d /tmp/jotest JOTest.java 2>/dev/null && java -cp /tmp/jotest JOTest ) \
   || { echo "  ❌ JOTest（JSON 配平扫描）失败"; FAIL=1; }
 
 note "5/7 跨文件接口契约（Java 改名 → 网页静默失效）"
-node -e '
-const fs=require("fs");
-const y=fs.readFileSync(".github/workflows/build-apk.yml","utf8");
-const re=/cat > (\S+) << .JAVA.\r?\n([\s\S]*?)\r?\n[ \t]*JAVA(?=\r?\n)/g;
-let m;while((m=re.exec(y))){ if(/MainActivity\.java$/.test(m[1])){
-  let b=m[2].split(/\r?\n/);
-  const inds=b.filter(l=>l.trim()).map(l=>l.match(/^ */)[0].length);
-  fs.writeFileSync("/tmp/MA.java", b.map(l=>l.slice(Math.min(...inds))).join("\n"));
-}}' || FAIL=1
-node tools/contract_check.js app.html /tmp/MA.java || FAIL=1
-node tools/parse_parity.js app.html .github/workflows/build-apk.yml || FAIL=1
+node tools/contract_check.js app.html app/src/main/java/com/minis/bookkeeping/MainActivity.java || FAIL=1
+node tools/parse_parity.js app.html app/src/main/java/com/minis/bookkeeping/NotificationReaderService.java || FAIL=1
 
 note "6/7 菜单/按钮指纹（golden）—— 改了 A 弄坏 B 的按钮"
 COMPARE=1 sh tools/menu_snapshot.sh --dump || FAIL=1

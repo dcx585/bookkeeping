@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Zhang</string>
+    <string name="a11y_desc">用于读取支付通知，自动记账。只读取通知文本，不会读取聊天内容或执行任何操作。</string>
+    <string name="a11y_summary">读取支付通知以自动记账</string>
+</resources>

@@ -46,4 +46,7 @@
 
 ## 许可证
 
-MIT
+本项目以 **MIT** 许可发布，全文见 [LICENSE](LICENSE)。
+
+部分解析规则借鉴自第三方项目，其来源与条款见 [NOTICE.md](NOTICE.md)——
+特别是 blue-whale-keeper 的许可为「MIT + 附加：禁止原样转售」，允许衍生开发自由定价/闭源/收费。
