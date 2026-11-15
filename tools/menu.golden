@@ -34,9 +34,12 @@ restoreData
 openSnapshots
 openSearch
 closeMore
+copyAutoDiag
+getElementById
 toggleAutoOn
 toggleKeepAlive
 askBatteryWaiver
+openAutoDiag
 getElementById
 restoreLatestSnapshot
 getElementById

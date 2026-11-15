@@ -436,6 +436,17 @@ input[type=checkbox]{accent-color:var(--accent)}
   </div>
 </div>
 
+<div class="modal" id="autodiagModal">
+  <div class="sheet"><h3>自动记账自检</h3>
+    <div style="font-size:11.5px;color:var(--text2);line-height:1.7;margin-bottom:8px">
+      把「日志说记了、流水里没有」这类不一致摊开看。截图或复制全部内容发我，比描述现象有用。
+    </div>
+    <div id="autodiagOut" style="font-size:12px;line-height:1.8;word-break:break-all;max-height:60vh;overflow:auto"></div>
+    <button class="cancel-btn" onclick="copyAutoDiag()" style="margin:10px 0 0">复制结果</button>
+    <button class="cancel-btn" onclick="document.getElementById('autodiagModal').classList.remove('show')" style="margin-top:6px">关闭</button>
+  </div>
+</div>
+
 <div class="modal" id="autoModal">
   <div class="sheet"><h3>自动记账</h3>
     <div id="autoSummary" style="font-size:12.5px;color:var(--text2);line-height:1.8;margin-bottom:12px"></div>
@@ -453,6 +464,7 @@ input[type=checkbox]{accent-color:var(--accent)}
     </div>
 
     <button class="cancel-btn" onclick="askBatteryWaiver()" style="margin:12px 0 0">🔋 加入电池白名单（国产系统必做）</button>
+    <button class="cancel-btn" onclick="openAutoDiag()" style="margin:8px 0 0">🔎 自动记账自检（查「说记了但没记上」）</button>
     <div id="autoUnparsed" style="font-size:11.5px;color:var(--text2);line-height:1.7;margin-top:10px"></div>
     <button class="cancel-btn" onclick="document.getElementById('autoModal').classList.remove('show')" style="margin-top:10px">关闭</button>
   </div>
@@ -643,6 +655,7 @@ input[type=checkbox]{accent-color:var(--accent)}
 <script src="js/11-parser-v1.js"></script>
 <script src="js/12-autobook.js"></script>
 <script src="js/13-init.js"></script>
+<script src="js/14-autodiag.js"></script>
 
 <script src="js/ai-parse.js"></script>
 </body>

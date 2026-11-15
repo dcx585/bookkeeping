@@ -1,6 +1,11 @@
 // ── State ──
 const SK='minis_bookkeeping_v5',BK='minis_budget_v3',AK='minis_accounts_v2',BGK='minis_bg_v1',IK='minis_invest_v1';
-let cm=new Date().toISOString().slice(0,7),ct='expense',cv='tx',eid=null,sq='';
+// ★ 2026-11-15：月份一律用【本地时间】算。
+//   原先是 new Date().toISOString().slice(0,7)（UTC）+ t.time.slice(0,7)（UTC 串），
+//   两边虽然一致，但本地每月 1 号 00:00–08:00 的交易会落到上个月 →
+//   「记了但流水里没有」。显示时间用的是本地，过滤用 UTC，本身就是隐患。
+function ymOf(time){const d=new Date(time);if(isNaN(d.getTime()))return '';return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')}
+let cm=ymOf(Date.now()),ct='expense',cv='tx',eid=null,sq='';
 const DA=['微信','银行卡','应急金','规划金','花呗'];
 const CATS=['餐饮','购物','医疗','交通','固定支出','其他'];
 const INC_CATS=['工资/月薪','工资/奖金','理财/基金收益','理财/股息','理财/利息','报销/工作报销','红包/转账','兼职/外快','退款','其他'];
@@ -169,4 +174,4 @@ function txOrder(list){
     return (pos[b.id]||0)-(pos[a.id]||0);      // 同一时刻：后记的排前面
   });
 }
-function mtx(){return txOrder(atx().filter(t=>t.time.slice(0,7)===cm))}
+function mtx(){return txOrder(atx().filter(t=>ymOf(t.time)===cm))}

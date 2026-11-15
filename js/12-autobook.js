@@ -126,7 +126,11 @@ async function autoBookkeep(){
   const seen=new Set();
   for(const n of q){
     const nid=n.id||('q_'+Date.now()+'_'+Math.random().toString(36).slice(2,6));
-    const es=parseNotifFull(n);   // 可能多笔
+    // ★ 2026-11-15：单条通知解析失败不能让整批丢账。
+    //   原来 parseNotifFull 一抛异常，循环中断 → 后面 stx/appendAutoLog 都不执行，
+    //   但 tx.push 已经在内存里发生过 → 用户以为记了、账本里却没有。
+    let es=[];
+    try{ es=parseNotifFull(n); }catch(err){ console.warn('[auto] 解析异常，跳过这条', n, err); es=[]; }
     if(!es.length){
       /* ★ 2026-11-07：这条已经过了原生过滤（说明长得像支付），却没认出金额。
          以前直接 ack 掉了 —— 等于钱花了、账没记、还查不出来是谁。
@@ -143,10 +147,13 @@ async function autoBookkeep(){
       if(seen.has(e.finger)||isAlreadyBooked(e)){ anyAuto=true; continue; }
       seen.add(e.finger);
       if(!e.needConfirm){
-        tx.push(makeTx(e,{auto:true})); autoN++; anyAuto=true; anyFresh=true;   // 打「自动」标记，便于在流水里辨认
+        const nt = makeTx(e,{auto:true});
+        tx.push(nt); autoN++; anyAuto=true; anyFresh=true;   // 打「自动」标记，便于在流水里辨认
         // 【关键】自动入账也必须留痕：否则用户打开框是空的，
         // 会误以为"根本没识别到"，而其实早就记进去了。
-        autoLog.push({ts:Date.now(), amount:e.amount, type:e.type,
+        // ★ 2026-11-15：同时记下这笔在账本里的 id —— 面板据此核对
+        //   「日志说记了」和「账本真的有」是否一致，不再只凭日志自说自话。
+        autoLog.push({ts:Date.now(), txId:nt.id, amount:e.amount, type:e.type,
                       note:e.note||'', account:e.account||'', category:e.category||'其他'});
       } else {
         confirmItems.push({pid:nid, entry:e}); anyConfirm=true; anyFresh=true;
@@ -161,6 +168,7 @@ async function autoBookkeep(){
     else if(!anyAuto && !anyConfirm && es.length) autoAck.push(nid);
   }
   stx(tx);
+  window.__autoLastRun = Date.now();      // 自检用：最近一次跑自动记账是什么时候
   window.__autoLastCount = confirmItems.length;
   if(autoN>0){ ra(); pendingAutoCount+=autoN; appendAutoLog(autoLog); }
   if(confirmItems.length){

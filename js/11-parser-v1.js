@@ -87,10 +87,16 @@ function singleParse(seg,parentAcc){
   else if(/话费|流量|充值|移动|联通|电信/.test(s)) category='话费';
   else if(/地铁|公交|打车|滴滴|车票|加油|停车|高速|铁路|航空/.test(s)) category='交通';
   else if(/还款|信用卡|花呗|借呗|白条/.test(s)) category='还款';
+  // ★ 2026-11-15：账户判定改用 detectSource，别再自己写一套正则。
+  //   原来「支付宝」排在最前 → 银行短信「支出(消费支付宝)20元」被判成支付宝账户，
+  //   而用户的账户列表里只有「微信/银行卡」→ 账记上了但余额不算进任何账户。
+  //   与 v2 共用同一个来源判定，两条路径才可能真正一致。
   let account='';
-  if(/支付宝/.test(s)) account='支付宝';
-  else if(/微信|财付通/.test(s)) account='微信';
-  else if(/银行卡|银行|招商|工商|建设|农业|中国银行|尾号\s?\d{3,6}|卡号\s?\d/.test(s)) account='银行卡';
+  const srcAcc = (typeof detectSource === 'function') ? detectSource(s, '') : 'OTHER';
+  if(srcAcc==='WECHAT') account='微信';
+  else if(srcAcc==='ALIPAY') account='支付宝';
+  else if(srcAcc==='BANK') account='银行卡';
+  else if(srcAcc==='TAOBAO'||srcAcc==='JD'||srcAcc==='PDD') account='支付宝';
   if(!account) account=parentAcc||'';
   if(!isPaymentSegment(s)) return null;
   return {amount:amt,type:type,category:category,account:account,

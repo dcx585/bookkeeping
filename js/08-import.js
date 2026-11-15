@@ -477,15 +477,23 @@ function renderImpList(){
   // ── 已自动入账（必须显眼：否则用户以为"没识别到"）──
   if(alog.length){
     const recent=alog.slice().reverse().slice(0,12);
+    // ★ 2026-11-15：日志不等于账本。这里按 txId 核对 —— 日志写了但账本里没有的，
+    //   必须显眼标出来，否则面板会一直显示"已自动入账"而流水里根本找不到。
+    const bookIds=new Set(atx().map(t=>t.id));
+    const missing=recent.filter(a=>a.txId&&!bookIds.has(a.txId)).length;
     html+=`<div style="margin-top:12px;padding-top:8px;border-top:1px dashed var(--border);display:flex;align-items:center;gap:8px">
-        <span style="flex:1;font-size:12px;color:#2a9d5c">✅ 已自动入账 ${alog.length} 笔（已在流水，无需确认）</span>
+        <span style="flex:1;font-size:12px;color:#2a9d5c">✅ 已自动入账 ${alog.length} 笔${missing?`<span style="color:#b4513c">（其中最近 ${missing} 笔在账本里已找不到）</span>`:''}</span>
         <button onclick="clearAutoLog();renderImpList()" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text2);font-size:11px;padding:3px 8px;cursor:pointer">清空</button>
       </div>`
-      + recent.map(a=>`<div style="display:flex;padding:5px 0;gap:8px;font-size:12px;color:var(--text2)">
+      + recent.map(a=>{
+        const gone=a.txId&&!bookIds.has(a.txId);
+        return `<div style="display:flex;padding:5px 0;gap:8px;font-size:12px;color:var(--text2)">
           <span style="width:64px;text-align:right;font-weight:600;color:var(--text)">¥${Number(a.amount).toFixed(2)}</span>
-          <span style="flex:1">${a.type==='income'?'收入':'支出'} · ${a.category||''}${a.account?' · '+a.account:''}<br><span style="opacity:.75">${(a.note||'').replace(/</g,'&lt;')}</span></span>
-          <span style="opacity:.6;white-space:nowrap">${new Date(a.ts).toLocaleTimeString().slice(0,5)}</span>
-        </div>`).join('');
+          <span style="flex:1">${a.type==='income'?'收入':'支出'} · ${a.category||''}${a.account?' · '+a.account:''}<br><span style="opacity:.75">${(a.note||'').replace(/</g,'&lt;')}</span>${gone?'<br><span style="color:#b4513c">⚠ 账本里已没有这笔（被删掉或写入失败）</span>':''}</span>
+          <span style="opacity:.6;white-space:nowrap">${(()=>{const d=new Date(a.ts);return (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')})()}</span>
+        </div>`;
+      }).join('');
+    if(missing) html+=`<div style="font-size:11.5px;color:#b4513c;line-height:1.6;margin-top:4px">→ 打开「更多 → 自动记账 → 🔎 自动记账自检」看具体哪笔对不上。</div>`;
   }
   if(dis.length){
     html+=`<div style="margin-top:12px;padding-top:8px;border-top:1px dashed var(--border);display:flex;align-items:center;gap:8px">

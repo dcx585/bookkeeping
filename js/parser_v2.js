@@ -33,15 +33,37 @@ const RE_PAID_NEAR    = new RegExp(
 // ---------- 来源识别 ----------
 function detectSource(raw, appName) {
   const t = (raw || '') + ' ' + (appName || '');
+  const app = appName || '';
+
+  // ★ 2026-11-15 修：银行短信里常写「支出(消费支付宝)20元」——那只是【支付渠道】，
+  //   不是这条通知的来源。原来支付宝/微信的品牌词排在最前，于是这类短信被判成
+  //   ALIPAY，账户记成「支付宝」。而用户的账户列表里只有「微信/银行卡」，
+  //   结果账记上了、余额却永远不算进任何账户（用户反馈的「有流水但没扣款」）。
+  //
+  //   新顺序：① App 名 → ② 强银行特征 → ③ 品牌词 → ④ 弱银行特征。
+  //   强银行特征（尾号/储蓄卡/借记卡/人民币/您账户）比"正文里提到某支付工具"可靠得多。
+
+  // ① App 名最可靠：通知来自哪个 App 就是哪个来源
+  if (/支付宝|alipay/i.test(app)) return 'ALIPAY';
+  if (/微信|wechat|财付通/i.test(app)) return 'WECHAT';
+  if (/淘宝|天猫/i.test(app)) return 'TAOBAO';
+  if (/京东|jd\.com/i.test(app)) return 'JD';
+  if (/拼多多|pinduoduo/i.test(app)) return 'PDD';
+  if (/银行|招商|工商|建设|农业|中信|浦发|民生|兴业|光大|华夏|广发|邮储|邮政储蓄/.test(app)) return 'BANK';
+
+  // ② 强银行特征：这些写法几乎只出现在银行自己的短信里
+  const bankStrong = /您尾号|尾号\s?\d{3,4}|储蓄卡|借记卡|信用卡|人民币\s*[-－]?\d|您账户|账户\d{3,4}|卡号\s?\d/;
+  if (bankStrong.test(t)) return 'BANK';
+
+  // ③ 品牌词（此时已排除"银行短信里提到支付宝"的情况）
   if (/支付宝|alipay/i.test(t)) return 'ALIPAY';
   if (/微信|财付通|wechat/i.test(t)) return 'WECHAT';
   if (/淘宝|天猫|taobao/i.test(t)) return 'TAOBAO';
   if (/京东|jd\.com|jingdong/i.test(t)) return 'JD';
   if (/拼多多|pinduoduo|pdd/i.test(t)) return 'PDD';
 
-  // 银行识别要宽松：真实银行短信常常**不含银行名**，只写
-  // 「您尾号1234的账户…」「您账户1234于…」。这些特征比银行名更可靠。
-  const bankSignals = /银行|招商|工商|建设|农业|中国银行|交通银行|中信|浦发|民生|兴业|光大|华夏|广发|平安银行|邮储|邮政储蓄|银联|信用卡|储蓄卡|借记卡|尾号\s?\d{3,4}|卡号|账户\d|人民币|您尾号|您账户/;
+  // ④ 弱银行特征
+  const bankSignals = /银行|招商|工商|建设|农业|中国银行|交通银行|中信|浦发|民生|兴业|光大|华夏|广发|平安银行|邮储|邮政储蓄|银联/;
   if (bankSignals.test(t)) return 'BANK';
 
   return 'OTHER';
