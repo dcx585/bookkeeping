@@ -20,10 +20,13 @@ jobs:
       # 只上传要发布的内容，不把整个仓库（tools/ docs/ .github/）推到公网
       - name: 收集发布文件
         run: |
+          set -e
           mkdir -p _site
           cp index.html app.html manifest.json icon.svg sw.js _site/ 2>/dev/null || true
           [ -f bg.jpg ] && cp bg.jpg _site/ || true
-          ls -la _site/
+          # ★ 2026-11-15 app.html 拆分后，脚本在 js/ 下 —— 不带上就是一个白屏
+          cp -r js _site/js
+          ls -la _site/ _site/js/
 
       - uses: actions/upload-pages-artifact@v3
         with:

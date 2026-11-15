@@ -18,18 +18,24 @@ note(){ printf '\n\033[1m── %s ──\033[0m\n' "$1"; }
 note "1/7 workflow YAML 完整性（heredoc 顶格行 → GitHub 静默不构建）"
 sh tools/wfcheck.sh || FAIL=1
 
-note "2/7 app.html 内联 JS 抽取 + 语法"
+note "2/7 前端脚本加载完整性 + 语法"
+# ★ 2026-11-15 拆分后：脚本在 js/*.js，app.html 只留 <script src>。
+#   这里必须按 html 里的顺序收集，缺一个文件就要炸 —— 不能静默少跑一部分代码。
 node -e '
-const fs=require("fs");
-const html=fs.readFileSync("app.html","utf8");
-const re=/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g;
-let m,chunks=[];
-while((m=re.exec(html))) chunks.push(m[1]);
-if(!chunks.length){console.error("❌ app.html 里没有 <script>，结构改坏了？");process.exit(1);}
-fs.writeFileSync("/tmp/scripts.js",chunks.join("\n;\n"));
-console.log("  script 块 "+chunks.length+" 个 / "+chunks.join("").length+" 字符");
+const fs=require("fs"),path=require("path");
+const {loadApp}=require("./tools/selftest/load_app");
+let r;
+try{ r=loadApp("app.html"); }catch(e){ console.error("❌ "+e.message); process.exit(1); }
+fs.writeFileSync("/tmp/scripts.js", r.src);
+console.log("  脚本 "+r.files.length+" 个 / "+r.src.length+" 字符（按 app.html 引用顺序）");
+console.log("  "+r.files.join(" "));
 ' || FAIL=1
-node --check /tmp/scripts.js && echo "  ✓ 内联 JS 语法正确" || { echo "  ❌ app.html 内联 JS 语法错误"; FAIL=1; }
+for f in js/*.js; do
+  node --check "$f" > /dev/null 2>&1 || { echo "  ❌ 语法错误：$f"; node --check "$f" 2>&1 | head -3; FAIL=1; }
+done
+node --check /tmp/scripts.js > /dev/null 2>&1 \
+  && echo "  ✓ 各 js 文件语法正确，拼接后也能解析" \
+  || { echo "  ❌ 拼接后的整体语法错误（可能是跨文件提前结束/重复声明）"; node --check /tmp/scripts.js 2>&1 | head -5; FAIL=1; }
 
 note "3/7 逻辑 + 回归 + 金标准快照测试"
 ( cd tools/selftest && node selftest.js ) || FAIL=1

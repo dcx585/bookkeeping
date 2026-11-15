@@ -2,6 +2,15 @@
 """
 把 js/parser_v2.js 内联进 app.html，实现「v2 解析开关」。
 
+⚠️⚠️ 2026-11-15 起【已退役，不要运行】⚠️⚠️
+    app.html 已经拆分：脚本全部在 js/*.js，用 <script src> 加载，
+    parser_v2.js 本身就是被直接引用的独立文件，不再需要内联。
+    本脚本若再运行，会把 v2 代码块重新插进 app.html，破坏拆分结构。
+
+    保留本文件是为了记录历史约束（下面那些坑仍然成立，只是现在不适用了）：
+    - v2 代码块是整块替换的，块内不能放手写代码
+    - 生成器里的钩子内容必须与 app.html 同步，不能只判断「标记在不在」
+
 设计原则：
 - 不删除任何原有代码，旧 parseNotifFull 完整保留 → 随时可回滚
 - 通过全局开关 PARSE_V2 分流，默认关闭
@@ -12,6 +21,10 @@ import re, sys, pathlib
 ROOT = pathlib.Path(__file__).parent.parent  # tools/ 的上一级才是项目根
 APP = ROOT / 'app.html'
 V2 = ROOT / 'js' / 'parser_v2.js'
+
+print('ERROR: inline_parser_v2.py 已退役 —— app.html 已拆分，v2 解析器由 '
+      '<script src="js/parser_v2.js"> 直接加载，不要再内联。', file=sys.stderr)
+sys.exit(2)
 
 MARK_BEGIN = '// ===== [V2-PARSER-BEGIN] auto-generated, do not edit ====='
 MARK_END = '// ===== [V2-PARSER-END] ====='

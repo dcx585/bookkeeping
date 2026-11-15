@@ -31,13 +31,27 @@ function scanAttr(s){
 }
 
 let m;
+// 页面静态 HTML 里的 onclick
 while ((m = EVENT_ATTR.exec(html))) scanAttr(m[1]);
 
+// ── 1b. 脚本里拼出来的 HTML 也带 onclick（如「解析诊断」面板整块是 innerHTML 拼的）──
+// 原来这部分在 html 的 <script> 块里，拆分后就扫不到了 → 动态按钮变成检查盲区。
+const { loadApp: _loadApp } = require('./selftest/load_app');
+let _src = '';
+try { _src = _loadApp(path.join(ROOT, 'app.html')).src; } catch (e) { console.error('❌ ' + e.message); process.exit(1); }
+EVENT_ATTR.lastIndex = 0;
+while ((m = EVENT_ATTR.exec(_src))) scanAttr(m[1]);
+EVENT_ATTR_TPL.lastIndex = 0;
+while ((m = EVENT_ATTR_TPL.exec(_src))) scanAttr(m[1]);
+
 // ── 2. 收集脚本里定义的函数 ──
-const scripts = [];
-const SCRIPT_RE = /<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g;
-let sm;
-while ((sm = SCRIPT_RE.exec(html))) scripts.push(sm[1]);
+// ★ 2026-11-15 拆分后脚本在 js/*.js（app.html 只留 <script src>），
+//   必须走统一的 loadApp，否则会扫到 0 个定义 → 每个 onclick 都「找不到函数」误报。
+const { loadApp } = require('./selftest/load_app');
+let appSrc;
+try { appSrc = loadApp(path.join(__dirname, '..', 'app.html')).src; }
+catch (e) { console.error('❌ ' + e.message); process.exit(1); }
+const scripts = [appSrc];
 
 const defined = new Set();
 for (const src of scripts){

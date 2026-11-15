@@ -26,8 +26,10 @@ function ok(v, msg) { if (!v) throw new Error(msg || '应为真'); }
 // ── 取常量与闸门函数（已在 harness 的 exportList 里导出 autoBookGate）──
 const gate = X.autoBookGate;
 const TH = (function () {
-  const m = /const\s+AUTO_THRESHOLD\s*=\s*(\d+(?:\.\d+)?)/.exec(
-    require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'app.html'), 'utf8'));
+  // ★ 拆分后常量不在 app.html 里，改从统一的脚本加载器读
+  const { loadApp } = require('./load_app');
+  const { src } = loadApp(require('path').join(__dirname, '..', '..', 'app.html'));
+  const m = /const\s+AUTO_THRESHOLD\s*=\s*(\d+(?:\.\d+)?)/.exec(src);
   return m ? Number(m[1]) : NaN;
 })();
 

@@ -2,9 +2,10 @@
 const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
+const { loadApp } = require('./load_app');
 
-const html = fs.readFileSync(path.join(__dirname, '..', '..', 'app.html'), 'utf8');
-const src = /<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/.exec(html)[1];
+// ★ 拆分后脚本在 js/*.js 里，按 <script src> 顺序拼接（与浏览器一致）
+const src = loadApp(path.join(__dirname, '..', '..', 'app.html')).src;
 
 function loadWith(parseV2) {
   const store = {};

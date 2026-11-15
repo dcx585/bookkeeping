@@ -17,22 +17,33 @@ GOLDEN="$ROOT/tools/menu.golden"
 HTML="$ROOT/app.html"
 
 DUMP=$(node -e '
-const fs=require("fs");
-const h=fs.readFileSync(process.argv[1],"utf8");
-// 抽出所有 <button> 的 (关键 class, 触发函数名)，按出现顺序
+const fs=require("fs"),path=require("path");
+const appPath=process.argv[1];
+const {loadApp}=require(path.resolve(appPath,"..","tools","selftest","load_app"));
+const h=fs.readFileSync(appPath,"utf8");
+// ★ 2026-11-15 拆分后：一部分 <button> 是脚本里拼 HTML 生成的
+//   （innerHTML = `...<button onclick="...">...`）。
+//   只扫 html 会漏掉它们 → 指纹静默变少、那些按钮从此无人看守。
+let jsSrc="";
+try{ jsSrc=loadApp(appPath).src; }catch(e){ console.error("❌ "+e.message); process.exit(1); }
+
 const out=[];
-const re=/<button\b([^>]*)>([\s\S]{0,60}?)<\/button>/g;
-let m;
-while((m=re.exec(h))){
-  const attrs=m[1];
-  const cls=(/class="([^"]*)"/.exec(attrs)||[,""])[1].split(/\s+/)[0]||"-";
-  const ev=["onclick","onchange","oninput"].map(e=>{
-    const r=new RegExp(e+"=\"([^\"]*)\"").exec(attrs); return r?r[1]:"";
-  }).filter(Boolean).join(";");
-  // 只保留函数名（去掉参数里的文案，否则一改文案就误报）
-  const fn=(ev.match(/[A-Za-z_$][\w$]*\s*\(/)||["-"+"()"])[0].replace(/\s*\($/,"");
-  out.push(fn);
+function scan(text){
+  const re=/<button\b([^>]*)>([\s\S]{0,60}?)<\/button>/g;
+  let m;
+  while((m=re.exec(text))){
+    const attrs=m[1];
+    const cls=(/class="([^"]*)"/.exec(attrs)||[,""])[1].split(/\s+/)[0]||"-";
+    const ev=["onclick","onchange","oninput"].map(e=>{
+      const r=new RegExp(e+"=\"([^\"]*)\"").exec(attrs); return r?r[1]:"";
+    }).filter(Boolean).join(";");
+    // 只保留函数名（去掉参数里的文案，否则一改文案就误报）
+    const fn=(ev.match(/[A-Za-z_$][\w$]*\s*\(/)||["-"+"()"])[0].replace(/\s*\($/,"");
+    out.push(fn);
+  }
 }
+scan(h);
+scan(jsSrc);
 console.log(out.join("\n"));
 ' "$HTML")
 

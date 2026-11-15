@@ -5,9 +5,10 @@ const path=require('path');
 
 // ── 1. 抽取 JS ──
 // 用相对当前文件(__dirname)定位 app.html，避免 CI 上取不到本地绝对路径
-const html=fs.readFileSync(path.join(__dirname,'..','..','app.html'),'utf8');
-const m=/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/.exec(html);
-let src=m[1];
+// ★ 2026-11-15 拆分后不再有内联脚本，统一走 loadApp 按 <script src> 顺序拼接
+const { loadApp } = require('./load_app');
+const html = fs.readFileSync(path.join(__dirname, '..', '..', 'app.html'), 'utf8');
+const { src, files: jsFiles } = loadApp(path.join(__dirname, '..', '..', 'app.html'));
 
 // ── 2. 伪造 DOM / 浏览器环境 ──
 const store={};
